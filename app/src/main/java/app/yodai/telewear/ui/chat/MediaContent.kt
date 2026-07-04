@@ -4,6 +4,7 @@ import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
@@ -32,6 +33,8 @@ import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -52,6 +55,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.rotary.onRotaryScrollEvent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.LinkAnnotation
@@ -78,7 +83,12 @@ import app.yodai.telewear.ui.components.rememberFilePath
 import app.yodai.telewear.ui.theme.TeleWearColors
 import app.yodai.telewear.util.formatDuration
 import coil.compose.AsyncImage
+import com.airbnb.lottie.compose.LottieAnimation
+import com.airbnb.lottie.compose.LottieCompositionSpec
+import com.airbnb.lottie.compose.LottieConstants
+import com.airbnb.lottie.compose.rememberLottieComposition
 import java.io.File
+import java.util.zip.GZIPInputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -238,6 +248,22 @@ fun PlayableRow(messageId: Long, c: MsgContent.Playable, fontScale: Float, onOpe
     }
 }
 
+/** Tiny embedded JPEG rendered as an instant blurry placeholder. */
+@Composable
+fun MiniThumb(bytes: ByteArray?, modifier: Modifier = Modifier) {
+    val bmp = remember(bytes) {
+        bytes?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size) }.getOrNull() }
+    }
+    if (bmp != null) {
+        Image(
+            bitmap = bmp.asImageBitmap(),
+            contentDescription = null,
+            modifier = modifier,
+            contentScale = ContentScale.Crop,
+        )
+    }
+}
+
 /** Video/GIF/video-message bubble: thumbnail + play badge; tap for fullscreen. */
 @Composable
 fun VideoBubble(c: MsgContent.Video, fontScale: Float, onPlay: () -> Unit) {
@@ -260,6 +286,8 @@ fun VideoBubble(c: MsgContent.Video, fontScale: Float, onPlay: () -> Unit) {
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
             )
+        } else {
+            MiniThumb(c.thumb, Modifier.fillMaxSize())
         }
         Box(
             modifier = Modifier
@@ -294,10 +322,39 @@ fun VideoBubble(c: MsgContent.Video, fontScale: Float, onPlay: () -> Unit) {
 
 @Composable
 fun StickerBubble(c: MsgContent.Sticker) {
-    val thumb = rememberFilePath(c.thumbFileId)
-    if (thumb != null) {
+    val fullPath = rememberFilePath(c.fileId)
+    val thumbPath = rememberFilePath(c.thumbFileId)
+
+    // Animated stickers (.tgs) are gzipped Lottie JSON — inflate off the main
+    // thread and loop the animation. Static webp renders through Coil.
+    if (c.isAnimated) {
+        val json by produceState<String?>(initialValue = null, fullPath) {
+            value = fullPath?.let { p ->
+                withContext(Dispatchers.IO) {
+                    runCatching {
+                        GZIPInputStream(File(p).inputStream()).use { it.readBytes().decodeToString() }
+                    }.getOrNull()
+                }
+            }
+        }
+        val spec = json?.let { LottieCompositionSpec.JsonString(it) }
+        if (spec != null) {
+            val composition by rememberLottieComposition(spec)
+            if (composition != null) {
+                LottieAnimation(
+                    composition = composition,
+                    iterations = LottieConstants.IterateForever,
+                    modifier = Modifier.size(84.dp),
+                )
+                return
+            }
+        }
+    }
+
+    val path = (if (c.isAnimated) thumbPath else fullPath) ?: thumbPath
+    if (path != null) {
         AsyncImage(
-            model = File(thumb),
+            model = File(path),
             contentDescription = "${c.emoji} sticker",
             modifier = Modifier.size(84.dp),
             contentScale = ContentScale.Fit,
@@ -357,6 +414,7 @@ fun VideoPlayerOverlay(fileId: Int, onClose: () -> Unit) {
     val context = LocalContext.current
     var path by remember { mutableStateOf<String?>(null) }
     var failed by remember { mutableStateOf(false) }
+    val downloadPct by graph.files.progress.collectAsState()
 
     LaunchedEffect(fileId) {
         graph.voicePlayer.stop()
@@ -385,7 +443,12 @@ fun VideoPlayerOverlay(fileId: Int, onClose: () -> Unit) {
             failed -> Text("Couldn't load video", fontSize = 11.sp)
             p == null -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 CircularProgressIndicator(modifier = Modifier.size(28.dp))
-                Text("Downloading…", fontSize = 10.sp, modifier = Modifier.padding(top = 8.dp))
+                val pct = downloadPct[fileId]
+                Text(
+                    if (pct != null) "Downloading… ${(pct * 100).toInt()}%" else "Downloading…",
+                    fontSize = 10.sp,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
             }
             else -> {
                 // Session default speed comes from the shared player (seeded by Settings).
@@ -581,6 +644,64 @@ private fun PdfPage(renderer: PdfRenderer, lock: Mutex, index: Int) {
         ) {
             CircularProgressIndicator(modifier = Modifier.size(20.dp))
         }
+    }
+}
+
+/**
+ * Fullscreen photo viewer: rotary bezel zooms (clockwise = in), drag pans,
+ * double-tap resets, X closes.
+ */
+@Composable
+fun ImageViewerOverlay(path: String, onClose: () -> Unit) {
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    var offsetY by remember { mutableFloatStateOf(0f) }
+    val focusRequester = remember { FocusRequester() }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .onRotaryScrollEvent { event ->
+                scale = (scale * (1f + event.verticalScrollPixels / 700f)).coerceIn(1f, 8f)
+                if (scale <= 1.01f) {
+                    offsetX = 0f
+                    offsetY = 0f
+                }
+                true
+            }
+            .focusRequester(focusRequester)
+            .focusable()
+            .pointerInput(Unit) {
+                detectDragGestures { _, drag ->
+                    offsetX += drag.x
+                    offsetY += drag.y
+                }
+            }
+            .pointerInput(Unit) {
+                detectTapGestures(onDoubleTap = {
+                    scale = 1f
+                    offsetX = 0f
+                    offsetY = 0f
+                })
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        LaunchedEffect(Unit) { focusRequester.requestFocus() }
+        AsyncImage(
+            model = File(path),
+            contentDescription = null,
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    translationX = offsetX
+                    translationY = offsetY
+                },
+            contentScale = ContentScale.Fit,
+        )
+        CloseChip(onClose)
     }
 }
 

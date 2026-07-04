@@ -1,0 +1,40 @@
+name: Build release APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Write Telegram API credentials
+        run: |
+          echo "telegram.api.id=${{ secrets.TELEGRAM_API_ID }}" >> local.properties
+          echo "telegram.api.hash=${{ secrets.TELEGRAM_API_HASH }}" >> local.properties
+
+      - name: Build signed release
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:assembleRelease -PbuildNumber=${{ github.run_number }} --no-daemon
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.1.${{ github.run_number }}
+          name: TeleWear 1.1.${{ github.run_number }}
+          body: "Automated build from ${{ github.sha }}"
+          files: app/build/outputs/apk/release/app-release.apk

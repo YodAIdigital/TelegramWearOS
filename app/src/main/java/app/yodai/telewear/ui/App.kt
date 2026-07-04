@@ -5,13 +5,11 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.ui.platform.LocalContext
 import androidx.wear.compose.material3.AppScaffold
 import androidx.wear.compose.navigation.SwipeDismissableNavHost
 import androidx.wear.compose.navigation.composable
 import androidx.wear.compose.navigation.rememberSwipeDismissableNavController
 import app.yodai.telewear.AppGraph
-import app.yodai.telewear.service.KeepAliveService
 import app.yodai.telewear.settings.AppSettings
 import app.yodai.telewear.telegram.AuthUi
 import app.yodai.telewear.ui.auth.AuthFlow
@@ -24,12 +22,9 @@ import app.yodai.telewear.ui.theme.TeleWearTheme
 
 @Composable
 fun TeleWearRoot(graph: AppGraph) {
+    // Keep-alive service lifecycle is owned by KeepAliveController (AppGraph),
+    // which also factors in the configurable battery floor.
     val settings by graph.settings.flow.collectAsState(initial = AppSettings())
-    val context = LocalContext.current
-
-    LaunchedEffect(settings.keepAlive) {
-        KeepAliveService.setEnabled(context, settings.keepAlive)
-    }
 
     CompositionLocalProvider(
         LocalAppGraph provides graph,

@@ -1,7 +1,10 @@
 package app.yodai.telewear.ui.chat
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +37,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -59,14 +63,19 @@ import androidx.wear.compose.material3.ScreenScaffold
 import androidx.wear.compose.material3.Text
 import app.yodai.telewear.AppGraph
 import app.yodai.telewear.audio.VoiceRecorder
+import app.yodai.telewear.settings.AppSettings
+import app.yodai.telewear.settings.quickReplyList
 import app.yodai.telewear.telegram.MsgContent
 import app.yodai.telewear.telegram.MsgItem
+import app.yodai.telewear.telegram.speakableText
+import androidx.compose.ui.platform.LocalContext
 import app.yodai.telewear.ui.components.LocalAppGraph
 import app.yodai.telewear.ui.components.LocalFontScale
-import app.yodai.telewear.ui.components.rememberFilePath
+import app.yodai.telewear.ui.components.rememberFileLoad
 import app.yodai.telewear.ui.components.rememberTextInputLauncher
 import app.yodai.telewear.ui.theme.TeleWearColors
 import app.yodai.telewear.util.avatarColor
+import app.yodai.telewear.util.buzz
 import app.yodai.telewear.util.formatDuration
 import app.yodai.telewear.util.formatTime
 import coil.compose.AsyncImage
@@ -109,12 +118,14 @@ class ChatViewModel(private val graph: AppGraph, private val chatId: Long) : Vie
 @Composable
 fun ChatScreen(chatId: Long) {
     val graph = LocalAppGraph.current
+    val context = LocalContext.current
     val vm: ChatViewModel = viewModel(key = "chat_$chatId") { ChatViewModel(graph, chatId) }
     val messages by vm.thread.messages.collectAsState()
     val outboxRead by vm.thread.lastReadOutbox.collectAsState()
     val names by vm.senderNames.collectAsState()
     val sendError by vm.thread.lastSendError.collectAsState()
     val connecting by graph.core.isConnecting.collectAsState()
+    val appSettings by graph.settings.flow.collectAsState(initial = AppSettings())
 
     // Send errors show briefly, then clear.
     LaunchedEffect(sendError) {
@@ -130,6 +141,7 @@ fun ChatScreen(chatId: Long) {
     var videoFileId by remember { mutableStateOf<Int?>(null) }
     var pdfFileId by remember { mutableStateOf<Int?>(null) }
     var playerTarget by remember { mutableStateOf<Pair<Long, MsgContent.Playable>?>(null) }
+    var menuTarget by remember { mutableStateOf<MsgItem?>(null) }
 
     val launchTextInput = rememberTextInputLauncher("Message") { vm.thread.sendText(it) }
 
@@ -151,6 +163,11 @@ fun ChatScreen(chatId: Long) {
                 // Index 0 (visual bottom): composer.
                 item {
                     ComposerRow(
+                        quickReplies = appSettings.quickReplyList(),
+                        onQuickReply = { reply ->
+                            buzz(context)
+                            vm.thread.sendText(reply)
+                        },
                         onKeyboard = launchTextInput,
                         onMic = { showRecorder = true },
                     )
@@ -166,6 +183,10 @@ fun ChatScreen(chatId: Long) {
                         onPlayVideo = { fileId -> videoFileId = fileId },
                         onOpenPdf = { fileId -> pdfFileId = fileId },
                         onOpenPlayer = { id, playable -> playerTarget = id to playable },
+                        onLongPress = {
+                            buzz(context, 25)
+                            menuTarget = it
+                        },
                     )
                 }
 
@@ -230,20 +251,7 @@ fun ChatScreen(chatId: Long) {
         }
 
         viewImagePath?.let { path ->
-            Box(
-                Modifier
-                    .fillMaxSize()
-                    .background(Color.Black)
-                    .clickable { viewImagePath = null },
-                contentAlignment = Alignment.Center,
-            ) {
-                AsyncImage(
-                    model = File(path),
-                    contentDescription = null,
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Fit,
-                )
-            }
+            ImageViewerOverlay(path = path, onClose = { viewImagePath = null })
         }
 
         videoFileId?.let { fileId ->
@@ -261,23 +269,127 @@ fun ChatScreen(chatId: Long) {
                 onClose = { playerTarget = null },
             )
         }
+
+        menuTarget?.let { msg ->
+            val speakText = msg.content.speakableText()
+            MessageMenuOverlay(
+                onReact = { emoji ->
+                    buzz(context)
+                    vm.thread.toggleReaction(msg.id, emoji)
+                    menuTarget = null
+                },
+                onSpeak = speakText?.let {
+                    {
+                        graph.speaker.speak(it)
+                        menuTarget = null
+                    }
+                },
+                onDismiss = { menuTarget = null },
+            )
+        }
+    }
+}
+
+/** Emoji offered in the long-press reaction picker. */
+private val QUICK_REACTIONS = listOf("👍", "❤️", "🔥", "😂", "😮", "🙏")
+
+@Composable
+private fun MessageMenuOverlay(
+    onReact: (String) -> Unit,
+    onSpeak: (() -> Unit)?,
+    onDismiss: () -> Unit,
+) {
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xE0000000))
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                QUICK_REACTIONS.take(3).forEach { ReactionButton(it, onReact) }
+            }
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(top = 8.dp),
+            ) {
+                QUICK_REACTIONS.drop(3).forEach { ReactionButton(it, onReact) }
+            }
+            if (onSpeak != null) {
+                Text(
+                    "🔊  Speak",
+                    fontSize = 12.sp,
+                    modifier = Modifier
+                        .padding(top = 12.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(TeleWearColors.incomingBubble)
+                        .clickable(onClick = onSpeak)
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun ComposerRow(onKeyboard: () -> Unit, onMic: () -> Unit) {
-    Row(
+private fun ReactionButton(emoji: String, onReact: (String) -> Unit) {
+    Box(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(top = 6.dp, bottom = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-        verticalAlignment = Alignment.CenterVertically,
+            .size(38.dp)
+            .clip(CircleShape)
+            .background(TeleWearColors.incomingBubble)
+            .clickable { onReact(emoji) },
+        contentAlignment = Alignment.Center,
     ) {
-        RoundAction(onClick = onKeyboard) {
-            Icon(Icons.Rounded.Keyboard, contentDescription = "Type a message", modifier = Modifier.size(20.dp))
+        Text(emoji, fontSize = 17.sp)
+    }
+}
+
+@Composable
+private fun ComposerRow(
+    quickReplies: List<String>,
+    onQuickReply: (String) -> Unit,
+    onKeyboard: () -> Unit,
+    onMic: () -> Unit,
+) {
+    Column(Modifier.fillMaxWidth()) {
+        // One-tap replies (configurable in Settings), scrollable sideways.
+        if (quickReplies.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally),
+            ) {
+                quickReplies.forEach { reply ->
+                    Text(
+                        reply,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(TeleWearColors.incomingBubble)
+                            .clickable { onQuickReply(reply) }
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
+            }
         }
-        RoundAction(onClick = onMic, background = MaterialTheme.colorScheme.primaryContainer) {
-            Icon(Icons.Rounded.Mic, contentDescription = "Record voice message", modifier = Modifier.size(20.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp, bottom = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RoundAction(onClick = onKeyboard) {
+                Icon(Icons.Rounded.Keyboard, contentDescription = "Type a message", modifier = Modifier.size(20.dp))
+            }
+            RoundAction(onClick = onMic, background = MaterialTheme.colorScheme.primaryContainer) {
+                Icon(Icons.Rounded.Mic, contentDescription = "Record voice message", modifier = Modifier.size(20.dp))
+            }
         }
     }
 }
@@ -300,6 +412,7 @@ private fun RoundAction(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageBubble(
     msg: MsgItem,
@@ -310,6 +423,7 @@ private fun MessageBubble(
     onPlayVideo: (Int) -> Unit,
     onOpenPdf: (Int) -> Unit,
     onOpenPlayer: (Long, MsgContent.Playable) -> Unit,
+    onLongPress: (MsgItem) -> Unit,
 ) {
     val fontScale = LocalFontScale.current
     val out = msg.isOutgoing
@@ -330,6 +444,7 @@ private fun MessageBubble(
                         bottomStart = if (out) 14.dp else 4.dp,
                     )
                 )
+                .combinedClickable(onClick = {}, onLongClick = { onLongPress(msg) })
                 .background(if (out) TeleWearColors.outgoingBubble else TeleWearColors.incomingBubble)
                 .padding(horizontal = 9.dp, vertical = 6.dp),
         ) {
@@ -357,6 +472,28 @@ private fun MessageBubble(
                     fontStyle = FontStyle.Italic,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+
+            if (msg.reactions.isNotEmpty()) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.padding(top = 3.dp),
+                ) {
+                    msg.reactions.take(3).forEach { r ->
+                        Text(
+                            if (r.count > 1) "${r.emoji} ${r.count}" else r.emoji,
+                            fontSize = 9.sp,
+                            color = TeleWearColors.onBubble,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(
+                                    if (r.chosen) MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
+                                    else Color(0x26FFFFFF)
+                                )
+                                .padding(horizontal = 5.dp, vertical = 1.dp),
+                        )
+                    }
+                }
             }
 
             Row(
@@ -387,7 +524,7 @@ private fun MessageBubble(
 
 @Composable
 private fun PhotoContent(c: MsgContent.Photo, fontScale: Float, onPhotoClick: (String) -> Unit) {
-    val path = rememberFilePath(c.fileId)
+    val load = rememberFileLoad(c.fileId)
     val ratio = if (c.height > 0) (c.width.toFloat() / c.height).coerceIn(0.6f, 1.8f) else 1f
     Box(
         modifier = Modifier
@@ -398,6 +535,7 @@ private fun PhotoContent(c: MsgContent.Photo, fontScale: Float, onPhotoClick: (S
             .background(Color(0xFF141B20)),
         contentAlignment = Alignment.Center,
     ) {
+        val path = load.path
         if (path != null) {
             AsyncImage(
                 model = File(path),
@@ -408,7 +546,39 @@ private fun PhotoContent(c: MsgContent.Photo, fontScale: Float, onPhotoClick: (S
                 contentScale = ContentScale.Crop,
             )
         } else {
-            CircularProgressIndicator(modifier = Modifier.size(22.dp))
+            // Instant blurry preview from the embedded minithumbnail,
+            // with live percent; tap cancels, tap again retries.
+            MiniThumb(c.thumb, Modifier.fillMaxSize())
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .clickable(onClick = load.cancelOrRetry),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (load.failed) {
+                    Text(
+                        "Tap to retry",
+                        fontSize = 9.sp,
+                        color = Color.White,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0x99000000))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                } else {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(modifier = Modifier.size(22.dp))
+                        load.progress?.let {
+                            Text(
+                                "${(it * 100).toInt()}%",
+                                fontSize = 9.sp,
+                                color = Color.White,
+                                modifier = Modifier.padding(top = 2.dp),
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
     if (c.caption.isNotEmpty()) {
@@ -428,6 +598,7 @@ private fun VoiceRecordOverlay(
     onSend: (VoiceRecorder.Recording) -> Unit,
 ) {
     val graph = LocalAppGraph.current
+    val context = LocalContext.current
     val recorder = graph.voiceRecorder
     var level by remember { mutableFloatStateOf(0f) }
     var seconds by remember { mutableIntStateOf(0) }
@@ -436,8 +607,10 @@ private fun VoiceRecordOverlay(
     val permissionLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) started = recorder.start().also { if (!it) onDismiss() }
-        else onDismiss()
+        if (granted) {
+            started = recorder.start().also { if (!it) onDismiss() }
+            if (started) buzz(context)
+        } else onDismiss()
     }
 
     LaunchedEffect(Unit) {
@@ -504,6 +677,7 @@ private fun VoiceRecordOverlay(
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primary)
                         .clickable {
+                            buzz(context)
                             val rec = recorder.finish()
                             if (rec != null) onSend(rec) else onDismiss()
                         },

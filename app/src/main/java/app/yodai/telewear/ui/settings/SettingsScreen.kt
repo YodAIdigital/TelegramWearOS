@@ -12,6 +12,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
@@ -31,8 +32,10 @@ import app.yodai.telewear.AppGraph
 import app.yodai.telewear.BuildConfig
 import app.yodai.telewear.settings.AppSettings
 import app.yodai.telewear.settings.FONT_SCALE_STEPS
+import app.yodai.telewear.settings.UpdateChecker
 import app.yodai.telewear.telegram.getOrNull
 import app.yodai.telewear.ui.components.LocalAppGraph
+import app.yodai.telewear.ui.components.rememberTextInputLauncher
 import app.yodai.telewear.ui.theme.TeleWearColors
 import dev.g000sha256.tdl.dto.FileType
 import kotlinx.coroutines.delay
@@ -49,6 +52,24 @@ class SettingsViewModel(private val graph: AppGraph) : ViewModel() {
     fun setNotifications(v: Boolean) = viewModelScope.launch { graph.settings.setNotificationsEnabled(v) }
     fun setShowPreview(v: Boolean) = viewModelScope.launch { graph.settings.setShowPreview(v) }
     fun setKeepAlive(v: Boolean) = viewModelScope.launch { graph.settings.setKeepAlive(v) }
+    fun setSmartDedupe(v: Boolean) = viewModelScope.launch { graph.settings.setSmartDedupe(v) }
+    fun setQuickReplies(v: String) = viewModelScope.launch { graph.settings.setQuickReplies(v) }
+
+    /** Battery floor for keep-alive: 0 (never pause) → 50% in steps of 10. */
+    fun cycleKeepAliveBattery() = viewModelScope.launch {
+        val next = when (settings.value.keepAliveMinBattery) {
+            0 -> 10; 10 -> 20; 20 -> 30; 30 -> 40; 40 -> 50; else -> 0
+        }
+        graph.settings.setKeepAliveMinBattery(next)
+    }
+
+    /** Media auto-clean TTL: off → 1 → 7 → 30 days. */
+    fun cycleAutoCleanup() = viewModelScope.launch {
+        val next = when (settings.value.autoCleanupDays) {
+            0 -> 1; 1 -> 7; 7 -> 30; else -> 0
+        }
+        graph.settings.setAutoCleanupDays(next)
+    }
 
     fun cycleFontScale() = viewModelScope.launch {
         val current = settings.value.fontScale
@@ -108,6 +129,36 @@ class SettingsViewModel(private val graph: AppGraph) : ViewModel() {
     }
 
     fun logout() = graph.core.logout()
+
+    // ---- self-update ----
+
+    private val updater = UpdateChecker(graph.appContext)
+
+    /** UI line under the update button. */
+    val updateStatus = MutableStateFlow<String?>(null)
+    private var pendingApk: String? = null
+
+    fun checkOrInstallUpdate() = viewModelScope.launch {
+        val apk = pendingApk
+        if (apk != null) {
+            updateStatus.value = "Downloading…"
+            val ok = updater.downloadAndInstall(apk)
+            updateStatus.value = if (ok) "Installer opened" else "Download failed"
+            pendingApk = null
+            return@launch
+        }
+        updateStatus.value = "Checking…"
+        val release = updater.latest()
+        when {
+            release == null -> updateStatus.value = "Can't reach updates"
+            !updater.isNewer(release) -> updateStatus.value = "Up to date"
+            release.apkUrl == null -> updateStatus.value = "${release.tag} has no APK"
+            else -> {
+                pendingApk = release.apkUrl
+                updateStatus.value = "${release.tag} available — tap to install"
+            }
+        }
+    }
 }
 
 private fun formatBytes(bytes: Long): String = when {
@@ -169,6 +220,38 @@ fun SettingsScreen() {
             }
 
             item {
+                SwitchButton(
+                    checked = settings.smartDedupe,
+                    onCheckedChange = { vm.setSmartDedupe(it) },
+                    enabled = settings.notificationsEnabled,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Smart mute", fontSize = 13.sp) },
+                    secondaryLabel = { Text("Skip alerts while phone connected", fontSize = 10.sp) },
+                )
+            }
+
+            item {
+                val current = settings.quickReplies
+                val editReplies = rememberTextInputLauncher("Quick replies (separate with ;)") {
+                    vm.setQuickReplies(it)
+                }
+                Button(
+                    onClick = editReplies,
+                    colors = ButtonDefaults.filledTonalButtonColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Quick replies", fontSize = 13.sp) },
+                    secondaryLabel = {
+                        Text(
+                            current.split(';').joinToString(" · ") { it.trim() },
+                            fontSize = 10.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    },
+                )
+            }
+
+            item {
                 Button(
                     onClick = { vm.cycleFontScale() },
                     colors = ButtonDefaults.filledTonalButtonColors(),
@@ -188,6 +271,24 @@ fun SettingsScreen() {
                     label = { Text("Stay connected", fontSize = 13.sp) },
                     secondaryLabel = { Text("Background sync — uses battery", fontSize = 10.sp) },
                 )
+            }
+
+            if (settings.keepAlive) {
+                item {
+                    Button(
+                        onClick = { vm.cycleKeepAliveBattery() },
+                        colors = ButtonDefaults.filledTonalButtonColors(),
+                        modifier = Modifier.fillMaxWidth(),
+                        label = {
+                            Text(
+                                if (settings.keepAliveMinBattery == 0) "Pause on low battery: never"
+                                else "Pause below ${settings.keepAliveMinBattery}% battery",
+                                fontSize = 13.sp,
+                            )
+                        },
+                        secondaryLabel = { Text("Resumes when charging", fontSize = 10.sp) },
+                    )
+                }
             }
 
             item { ListHeader { Text("Playback") } }
@@ -233,6 +334,38 @@ fun SettingsScreen() {
                         )
                     },
                     secondaryLabel = { Text("Tap to clear downloads", fontSize = 10.sp) },
+                )
+            }
+
+            item {
+                Button(
+                    onClick = { vm.cycleAutoCleanup() },
+                    colors = ButtonDefaults.filledTonalButtonColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                    label = {
+                        Text(
+                            when (settings.autoCleanupDays) {
+                                0 -> "Auto-clean media: off"
+                                1 -> "Auto-clean media: 1 day"
+                                else -> "Auto-clean media: ${settings.autoCleanupDays} days"
+                            },
+                            fontSize = 13.sp,
+                        )
+                    },
+                    secondaryLabel = { Text("Deletes old downloads automatically", fontSize = 10.sp) },
+                )
+            }
+
+            item {
+                val updateStatus by vm.updateStatus.collectAsState()
+                Button(
+                    onClick = { vm.checkOrInstallUpdate() },
+                    colors = ButtonDefaults.filledTonalButtonColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Check for updates", fontSize = 13.sp) },
+                    secondaryLabel = {
+                        Text(updateStatus ?: "From GitHub releases", fontSize = 10.sp)
+                    },
                 )
             }
 

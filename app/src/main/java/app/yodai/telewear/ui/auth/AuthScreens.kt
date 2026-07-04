@@ -100,7 +100,12 @@ fun AuthFlow(state: AuthUi) {
 @Composable
 private fun LoadingScreen() {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        CircularProgressIndicator()
+        // Full-screen ring hugging the round display edge.
+        CircularProgressIndicator(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(6.dp),
+        )
     }
 }
 

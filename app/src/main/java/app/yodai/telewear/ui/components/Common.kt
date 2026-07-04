@@ -13,7 +13,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -48,6 +51,44 @@ fun rememberFilePath(fileId: Int?): String? {
         path = fileId?.let { graph.files.path(it) }
     }
     return path
+}
+
+/** [rememberFilePath] plus live progress, failure detection, and cancel/retry. */
+@Stable
+class FileLoadState(
+    val path: String?,
+    /** 0..1 while a download is running, null otherwise. */
+    val progress: Float?,
+    /** True when the download finished without producing a file (cancelled/error). */
+    val failed: Boolean,
+    /** Cancels an in-flight download, or retries after a failure. */
+    val cancelOrRetry: () -> Unit,
+)
+
+@Composable
+fun rememberFileLoad(fileId: Int?): FileLoadState {
+    val graph = LocalAppGraph.current
+    var attempt by remember(fileId) { mutableIntStateOf(0) }
+    var path by remember(fileId) { mutableStateOf<String?>(null) }
+    var settled by remember(fileId) { mutableStateOf(false) }
+    LaunchedEffect(fileId, attempt) {
+        settled = false
+        path = fileId?.let { graph.files.path(it) }
+        settled = true
+    }
+    val progressMap by graph.files.progress.collectAsState()
+    return FileLoadState(
+        path = path,
+        progress = fileId?.let { progressMap[it] },
+        failed = settled && path == null,
+        cancelOrRetry = {
+            when {
+                fileId == null || path != null -> Unit
+                settled -> attempt++
+                else -> graph.files.cancel(fileId)
+            }
+        },
+    )
 }
 
 /** Chat/user avatar: photo if available, otherwise Telegram-style colored initials. */

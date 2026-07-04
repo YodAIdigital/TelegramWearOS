@@ -14,6 +14,7 @@ import androidx.core.content.ContextCompat
 import app.yodai.telewear.R
 import app.yodai.telewear.TeleWearApp
 import app.yodai.telewear.settings.SettingsRepository
+import app.yodai.telewear.settings.quickReplyList
 import app.yodai.telewear.telegram.ChatRepository
 import app.yodai.telewear.telegram.TelegramCore
 import app.yodai.telewear.telegram.previewText
@@ -36,6 +37,7 @@ class MessageNotifier(
     private val chats: ChatRepository,
     private val settings: SettingsRepository,
     private val activeChatId: StateFlow<Long?>,
+    private val phoneLink: PhoneLinkMonitor,
     scope: CoroutineScope,
 ) {
 
@@ -54,6 +56,9 @@ class MessageNotifier(
         if (activeChatId.value == m.chatId) return
         val s = settings.flow.first()
         if (!s.notificationsEnabled) return
+        // Smart dedupe: while the phone is connected, its Telegram app already
+        // bridges this message's notification to the watch.
+        if (s.smartDedupe && phoneLink.phoneConnected.value) return
         val chat = chats.chatItem(m.chatId) ?: return
         if (chat.muted) return
         val granted = ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
@@ -93,7 +98,13 @@ class MessageNotifier(
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
             ),
         )
-            .addRemoteInput(RemoteInput.Builder(KEY_REPLY).setLabel("Reply").build())
+            .addRemoteInput(
+                RemoteInput.Builder(KEY_REPLY)
+                    .setLabel("Reply")
+                    // One-tap chips on the notification, straight from Settings.
+                    .setChoices(s.quickReplyList().toTypedArray())
+                    .build()
+            )
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
             .setAllowGeneratedReplies(true)
             .build()

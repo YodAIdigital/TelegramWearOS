@@ -4,12 +4,14 @@ An unofficial, standalone **Telegram client for Wear OS**, designed for the **Sa
 
 | | |
 |---|---|
-| Chats | Full chat list — private chats, groups, channels — with avatars, unread badges, mute icons |
-| Messages | Text bubbles, photos (tap to view full screen), voice notes with playback, read receipts (✓/✓✓) |
-| Send | Text via watch keyboard / voice dictation / emoji (system RemoteInput), and recorded **voice messages** (Ogg/Opus, exactly like official clients) |
-| Notifications | MessagingStyle notifications with inline **Reply** and **Mark read** actions |
-| Settings | Notification toggle, message-preview toggle, **font size** (4 steps), optional background connection, logout |
-| Design | Wear Material 3, Telegram-blue dark theme, pure-black background, round-screen aware, rotary scrolling |
+| Chats | Full chat list — private chats, groups, channels — with avatars, unread badges, mute icons, **Telegram folder chips**, and **search** |
+| Messages | Text bubbles with tappable links, photos (instant blurry preview → tap for a **bezel-zoomable** viewer), videos/GIFs with full player controls, voice notes & audio files with a speed-controlled player, PDFs, animated **Lottie stickers**, download progress + tap-to-cancel |
+| Send | Text via watch keyboard / voice dictation / emoji (system RemoteInput), recorded **voice messages** (Ogg/Opus), configurable **quick-reply chips**, and emoji **reactions** (long-press a message) |
+| Message menu | Long-press any bubble: react 👍❤️🔥😂😮🙏 or **read aloud** via on-watch TTS |
+| Notifications | MessagingStyle with inline **Reply** (incl. quick-reply choices) and **Mark read**; **smart mute** skips duplicates while the phone is connected |
+| Glanceable | **Tile** with unread total + top chats (deep-links into them) and a watch-face **complication** with the unread count |
+| Settings | Notifications, previews, smart mute, quick replies, font size, playback speed, stay-connected with a **battery floor**, media cache view/clear, **auto-clean by age**, in-app **updates from GitHub**, logout |
+| Design | Wear Material 3, Yodai-green dark theme, pure-black background, round-screen aware, rotary scrolling, haptic ticks |
 
 ---
 
@@ -71,6 +73,16 @@ $adb = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
 ```
 
 (or `.\gradlew.bat :app:installDebug` once connected).
+
+---
+
+## Updates & CI
+
+Every push to `main` triggers the GitHub Actions workflow ([.github/workflows/build.yml](.github/workflows/build.yml)), which builds a signed release APK and publishes it as a GitHub release tagged `v1.1.<run>`. **Settings → Check for updates** downloads and installs the newest one directly on the watch (grant "install unknown apps" on first use).
+
+- The updater talks to the **unauthenticated** GitHub API, so it only works while the repo is **public**. On a private repo it reports "can't reach updates" — download the release APK from GitHub and `adb install` it instead.
+- CI needs two repository secrets (already set): `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`.
+- [app/release.keystore](app/release.keystore) is committed deliberately: it pins a stable signature so CI builds install *over* local builds without uninstalling. It contains no account secrets — but anyone with the file can sign APKs that update this app, which is acceptable for a personal sideload project. Keep the repo private if that bothers you (and use manual installs), or swap in your own keystore.
 
 ---
 

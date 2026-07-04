@@ -1,6 +1,9 @@
 package app.yodai.telewear.telegram
 
 import dev.g000sha256.tdl.dto.Chat
+import dev.g000sha256.tdl.dto.ChatList
+import dev.g000sha256.tdl.dto.ChatListArchive
+import dev.g000sha256.tdl.dto.ChatListFolder
 import dev.g000sha256.tdl.dto.ChatListMain
 import dev.g000sha256.tdl.dto.ChatNotificationSettings
 import dev.g000sha256.tdl.dto.ChatPosition
@@ -13,7 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -38,9 +41,15 @@ class ChatRepository(private val core: TelegramCore, private val scope: Coroutin
     private val states = MutableStateFlow<Map<Long, ChatState>>(emptyMap())
     private val users = MutableStateFlow<Map<Long, User>>(emptyMap())
 
-    val chatList: StateFlow<List<ChatItem>> = states.map { map ->
+    /** Telegram chat folders (id → name), in the user's configured order. */
+    val folders = MutableStateFlow<List<Pair<Int, String>>>(emptyList())
+
+    /** null = the main list; otherwise a folder id from [folders]. */
+    val selectedFolderId = MutableStateFlow<Int?>(null)
+
+    val chatList: StateFlow<List<ChatItem>> = combine(states, selectedFolderId) { map, folderId ->
         map.values
-            .mapNotNull { it.toChatItem() }
+            .mapNotNull { it.toChatItem(folderId) }
             .sortedWith(compareByDescending<ChatItem> { it.pinned }.thenByDescending { it.order })
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
@@ -74,7 +83,16 @@ class ChatRepository(private val core: TelegramCore, private val scope: Coroutin
         scope.launch {
             core.updates { it.chatPositionUpdates }.collect { u ->
                 mutate(u.chatId) { st ->
-                    st.copy(positions = st.positions.filterNot { p -> p.list::class == u.position.list::class } + u.position)
+                    st.copy(positions = st.positions.filterNot { p -> sameList(p.list, u.position.list) } + u.position)
+                }
+            }
+        }
+        scope.launch {
+            core.updates { it.chatFoldersUpdates }.collect { u ->
+                folders.value = u.chatFolders.filterNotNull().map { it.id to it.name.text.text }
+                // Drop a stale selection if the folder was deleted on another device.
+                if (selectedFolderId.value != null && folders.value.none { it.first == selectedFolderId.value }) {
+                    selectedFolderId.value = null
                 }
             }
         }
@@ -109,7 +127,35 @@ class ChatRepository(private val core: TelegramCore, private val scope: Coroutin
         }
     }
 
-    fun chatItem(chatId: Long): ChatItem? = states.value[chatId]?.toChatItem()
+    /** Switches the visible list and makes sure that folder's chats are loaded. */
+    fun selectFolder(folderId: Int?) {
+        selectedFolderId.value = folderId
+        if (folderId != null) {
+            scope.launch {
+                repeat(5) {
+                    val r = core.client.loadChats(chatList = ChatListFolder(folderId), limit = 100)
+                    if (r.isNotFound()) return@launch
+                }
+            }
+        }
+    }
+
+    /**
+     * Local chat search (title/username). Results outside the main list still
+     * render — they just carry no pinned/order affinity.
+     */
+    suspend fun searchChats(query: String): List<ChatItem> {
+        val ids = core.client.searchChats(query = query, typeFilter = null, limit = 20)
+            .getOrNull()?.chatIds ?: return emptyList()
+        return ids.toList().mapNotNull { id ->
+            val st = states.value[id] ?: core.client.getChat(id).getOrNull()?.let { c ->
+                c.toState().also { states.value = states.value + (c.id to it) }
+            }
+            st?.let { it.toChatItem(null) ?: it.buildItem(pinned = false, order = 0L) }
+        }
+    }
+
+    fun chatItem(chatId: Long): ChatItem? = states.value[chatId]?.toChatItem(null)
 
     fun cachedUser(userId: Long): User? = users.value[userId]
 
@@ -140,9 +186,16 @@ class ChatRepository(private val core: TelegramCore, private val scope: Coroutin
         muted = notificationSettings.isMuted(),
     )
 
-    private fun ChatState.toChatItem(): ChatItem? {
-        val mainPosition = positions.firstOrNull { it.list is ChatListMain } ?: return null
-        if (mainPosition.order == 0L) return null
+    private fun ChatState.toChatItem(folderId: Int?): ChatItem? {
+        val position = positions.firstOrNull { p ->
+            val l = p.list
+            if (folderId == null) l is ChatListMain else l is ChatListFolder && l.chatFolderId == folderId
+        } ?: return null
+        if (position.order == 0L) return null
+        return buildItem(pinned = position.isPinned, order = position.order)
+    }
+
+    private fun ChatState.buildItem(pinned: Boolean, order: Long): ChatItem {
         val supergroup = type as? ChatTypeSupergroup
         return ChatItem(
             id = id,
@@ -151,13 +204,21 @@ class ChatRepository(private val core: TelegramCore, private val scope: Coroutin
             isGroup = type is ChatTypeBasicGroup || (supergroup != null && !supergroup.isChannel),
             unread = unread,
             muted = muted,
-            pinned = mainPosition.isPinned,
-            order = mainPosition.order,
+            pinned = pinned,
+            order = order,
             preview = lastMessage?.content?.toMsgContent()?.previewText().orEmpty(),
             date = lastMessage?.date ?: 0,
             photoFileId = photoFileId,
         )
     }
+}
+
+/** Positions are keyed by list identity — folders differ by id, not class. */
+private fun sameList(a: ChatList, b: ChatList): Boolean = when {
+    a is ChatListMain && b is ChatListMain -> true
+    a is ChatListArchive && b is ChatListArchive -> true
+    a is ChatListFolder && b is ChatListFolder -> a.chatFolderId == b.chatFolderId
+    else -> false
 }
 
 private fun ChatNotificationSettings.isMuted(): Boolean =

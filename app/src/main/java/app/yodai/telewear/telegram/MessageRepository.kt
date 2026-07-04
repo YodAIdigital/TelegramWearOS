@@ -7,6 +7,7 @@ import dev.g000sha256.tdl.dto.InputFileLocal
 import dev.g000sha256.tdl.dto.InputMessageContent
 import dev.g000sha256.tdl.dto.InputMessageText
 import dev.g000sha256.tdl.dto.InputMessageVoiceNote
+import dev.g000sha256.tdl.dto.ReactionTypeEmoji
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -99,6 +100,15 @@ class ChatThread(
                 .filter { it.chatId == chatId }
                 .collect { lastReadOutbox.value = it.lastReadOutboxMessageId }
         }
+        scope.launch {
+            core.updates { it.messageInteractionInfoUpdates }
+                .filter { it.chatId == chatId }
+                .collect { u ->
+                    raw.value = raw.value.map {
+                        if (it.id == u.messageId) it.copy(reactions = u.interactionInfo.toReactionChips()) else it
+                    }
+                }
+        }
     }
 
     /**
@@ -172,6 +182,29 @@ class ChatThread(
                     Log.w(TAG, "send $label FAILED: ${r.code} ${r.message}")
                     lastSendError.value = "Send failed: ${r.message} (${r.code})"
                 }
+            }
+        }
+    }
+
+    /** Adds the emoji reaction, or removes it if it's already ours. */
+    fun toggleReaction(messageId: Long, emoji: String) {
+        val mine = raw.value.firstOrNull { it.id == messageId }
+            ?.reactions?.any { it.emoji == emoji && it.chosen } == true
+        core.async { client ->
+            if (mine) {
+                client.removeMessageReaction(
+                    chatId = chatId,
+                    messageId = messageId,
+                    reactionType = ReactionTypeEmoji(emoji),
+                )
+            } else {
+                client.addMessageReaction(
+                    chatId = chatId,
+                    messageId = messageId,
+                    reactionType = ReactionTypeEmoji(emoji),
+                    isBig = false,
+                    updateRecentReactions = false,
+                ).errorOrNull()?.let { Log.w(TAG, "reaction failed: $it") }
             }
         }
     }

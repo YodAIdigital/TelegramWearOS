@@ -19,12 +19,15 @@ android {
     namespace = "app.yodai.telewear"
     compileSdk = 37
 
+    // CI stamps builds with -PbuildNumber=<run number>; local builds are "-dev".
+    val buildNumber = (findProperty("buildNumber") as? String)?.toIntOrNull() ?: 0
+
     defaultConfig {
         applicationId = "app.yodai.telewear"
         minSdk = 30
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 1 + buildNumber
+        versionName = if (buildNumber > 0) "1.1.$buildNumber" else "1.1.0-dev"
 
         buildConfigField("int", "TELEGRAM_API_ID", telegramApiId)
         buildConfigField("String", "TELEGRAM_API_HASH", "\"$telegramApiHash\"")
@@ -37,13 +40,23 @@ android {
         }
     }
 
+    signingConfigs {
+        // Committed keystore: NOT a secret — it only pins a stable signature so
+        // CI-built releases install over local builds (personal sideload app).
+        create("release") {
+            storeFile = file("release.keystore")
+            storePassword = "telewear-release"
+            keyAlias = "telewear"
+            keyPassword = "telewear-release"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Sideload-friendly: sign release with the debug key so `assembleRelease` installs directly.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
@@ -99,4 +112,13 @@ dependencies {
     implementation(libs.zxing.core)
 
     implementation(libs.tdl.coroutines)
+
+    implementation(libs.play.services.wearable)
+    implementation(libs.kotlinx.coroutines.play.services)
+    implementation(libs.lottie.compose)
+    implementation(libs.wear.tiles)
+    implementation(libs.wear.protolayout)
+    implementation(libs.wear.protolayout.expression)
+    implementation(libs.wear.complications)
+    implementation(libs.concurrent.futures.ktx)
 }

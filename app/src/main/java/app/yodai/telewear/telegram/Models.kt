@@ -6,6 +6,7 @@ import dev.g000sha256.tdl.dto.MessageAudio
 import dev.g000sha256.tdl.dto.MessageCall
 import dev.g000sha256.tdl.dto.MessageContent
 import dev.g000sha256.tdl.dto.MessageDocument
+import dev.g000sha256.tdl.dto.MessageInteractionInfo
 import dev.g000sha256.tdl.dto.MessagePhoto
 import dev.g000sha256.tdl.dto.MessageSenderUser
 import dev.g000sha256.tdl.dto.MessageSendingStateFailed
@@ -15,6 +16,8 @@ import dev.g000sha256.tdl.dto.MessageText
 import dev.g000sha256.tdl.dto.MessageVideo
 import dev.g000sha256.tdl.dto.MessageVideoNote
 import dev.g000sha256.tdl.dto.MessageVoiceNote
+import dev.g000sha256.tdl.dto.ReactionTypeEmoji
+import dev.g000sha256.tdl.dto.StickerFormatTgs
 
 /**
  * UI-facing message model. TDLib's generated classes are immutable and huge;
@@ -29,7 +32,26 @@ data class MsgItem(
     val content: MsgContent,
     val pending: Boolean,
     val failed: Boolean,
+    val reactions: List<ReactionChip> = emptyList(),
 )
+
+/** One emoji reaction aggregated on a message ("👍 3", highlighted if mine). */
+data class ReactionChip(val emoji: String, val count: Int, val chosen: Boolean)
+
+fun MessageInteractionInfo?.toReactionChips(): List<ReactionChip> =
+    this?.reactions?.reactions
+        ?.mapNotNull { r ->
+            (r.type as? ReactionTypeEmoji)?.let { ReactionChip(it.emoji, r.totalCount, r.isChosen) }
+        }
+        ?: emptyList()
+
+/** Best text for read-aloud: message text or media caption. */
+fun MsgContent.speakableText(): String? = when (this) {
+    is MsgContent.Text -> text
+    is MsgContent.Photo -> caption.ifBlank { null }
+    is MsgContent.Video -> caption.ifBlank { null }
+    else -> null
+}
 
 data class ChatItem(
     val id: Long,
@@ -47,7 +69,15 @@ data class ChatItem(
 
 sealed interface MsgContent {
     data class Text(val text: String) : MsgContent
-    data class Photo(val fileId: Int, val width: Int, val height: Int, val caption: String) : MsgContent
+
+    data class Photo(
+        val fileId: Int,
+        val width: Int,
+        val height: Int,
+        val caption: String,
+        /** Tiny embedded JPEG shown instantly while the real photo downloads. */
+        val thumb: ByteArray?,
+    ) : MsgContent
 
     /** Voice notes and music/audio files — both play through the shared player. */
     data class Playable(val fileId: Int, val duration: Int, val title: String?) : MsgContent
@@ -61,9 +91,15 @@ sealed interface MsgContent {
         val height: Int,
         val caption: String,
         val label: String,
+        val thumb: ByteArray?,
     ) : MsgContent
 
-    data class Sticker(val emoji: String, val thumbFileId: Int?) : MsgContent
+    data class Sticker(
+        val emoji: String,
+        val fileId: Int,
+        val isAnimated: Boolean,
+        val thumbFileId: Int?,
+    ) : MsgContent
 
     data class Doc(val fileId: Int, val fileName: String, val mime: String, val size: Long) : MsgContent
 
@@ -79,6 +115,7 @@ fun Message.toItem(): MsgItem = MsgItem(
     content = content.toMsgContent(),
     pending = sendingState is MessageSendingStatePending,
     failed = sendingState is MessageSendingStateFailed,
+    reactions = interactionInfo.toReactionChips(),
 )
 
 fun MessageContent.toMsgContent(): MsgContent = when (this) {
@@ -88,7 +125,7 @@ fun MessageContent.toMsgContent(): MsgContent = when (this) {
         val sizes = photo.sizes.filterNotNull()
         val best = sizes.firstOrNull { it.width >= 400 } ?: sizes.maxByOrNull { it.width }
         if (best != null) {
-            MsgContent.Photo(best.photo.id, best.width, best.height, caption.text)
+            MsgContent.Photo(best.photo.id, best.width, best.height, caption.text, photo.minithumbnail?.data)
         } else {
             MsgContent.Other("📷 Photo")
         }
@@ -112,6 +149,7 @@ fun MessageContent.toMsgContent(): MsgContent = when (this) {
         height = video.height,
         caption = caption.text,
         label = "Video",
+        thumb = video.minithumbnail?.data,
     )
 
     is MessageVideoNote -> MsgContent.Video(
@@ -122,6 +160,7 @@ fun MessageContent.toMsgContent(): MsgContent = when (this) {
         height = videoNote.length,
         caption = "",
         label = "Video message",
+        thumb = videoNote.minithumbnail?.data,
     )
 
     is MessageAnimation -> MsgContent.Video(
@@ -132,9 +171,15 @@ fun MessageContent.toMsgContent(): MsgContent = when (this) {
         height = animation.height,
         caption = caption.text,
         label = "GIF",
+        thumb = animation.minithumbnail?.data,
     )
 
-    is MessageSticker -> MsgContent.Sticker(sticker.emoji, sticker.thumbnail?.file?.id)
+    is MessageSticker -> MsgContent.Sticker(
+        emoji = sticker.emoji,
+        fileId = sticker.sticker.id,
+        isAnimated = sticker.format is StickerFormatTgs,
+        thumbFileId = sticker.thumbnail?.file?.id,
+    )
 
     is MessageDocument -> MsgContent.Doc(
         fileId = document.document.id,
