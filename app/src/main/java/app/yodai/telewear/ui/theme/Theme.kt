@@ -6,30 +6,32 @@ import androidx.wear.compose.material3.ColorScheme
 import androidx.wear.compose.material3.MaterialTheme
 
 /**
- * Telegram-flavored dark palette on Wear Material 3.
+ * YodAI Digital brand palette (yodaidigital.com) on Wear Material 3:
+ * signature orange #F97316 on warm near-black, cream text.
  * Watch backgrounds stay pure black (OLED battery + design guidance).
  */
 object TeleWearColors {
-    val telegramBlue = Color(0xFF4FAEF8)
-    val telegramBlueDim = Color(0xFF2E7CC0)
-    val outgoingBubble = Color(0xFF2D5D82)
-    val incomingBubble = Color(0xFF232C33)
-    val onBubble = Color(0xFFF2F6F9)
-    val timestamp = Color(0xB3FFFFFF)
-    val recordRed = Color(0xFFE85C5C)
+    val accent = Color(0xFFF97316)        // --accent
+    val accentDim = Color(0xFFEA580C)     // --accent2
+    val accentLight = Color(0xFFFDBA74)
+    val outgoingBubble = Color(0xFF6D3A10) // burnt-orange bubble for own messages
+    val incomingBubble = Color(0xFF221B14) // --bg-warm, lifted for bubbles
+    val onBubble = Color(0xFFFAF8F5)       // --text
+    val timestamp = Color(0xB3FAF8F5)
+    val recordRed = Color(0xFFEF4444)      // site error red
 }
 
 private val WearColorScheme = ColorScheme(
-    primary = TeleWearColors.telegramBlue,
-    primaryDim = TeleWearColors.telegramBlueDim,
-    primaryContainer = Color(0xFF1C4A6B),
-    onPrimary = Color(0xFF00344E),
-    onPrimaryContainer = Color(0xFFCBE6FF),
-    secondary = Color(0xFF9CCBEF),
-    secondaryDim = Color(0xFF6FA3C8),
-    secondaryContainer = Color(0xFF243845),
-    onSecondary = Color(0xFF0B3349),
-    onSecondaryContainer = Color(0xFFD3E9F9),
+    primary = TeleWearColors.accent,
+    primaryDim = TeleWearColors.accentDim,
+    primaryContainer = Color(0xFF4A2A0E),
+    onPrimary = Color(0xFF2A1200),
+    onPrimaryContainer = Color(0xFFFFDCC1),
+    secondary = TeleWearColors.accentLight,
+    secondaryDim = Color(0xFFE39A54),
+    secondaryContainer = Color(0xFF2A221A),
+    onSecondary = Color(0xFF3A2410),
+    onSecondaryContainer = Color(0xFFF0E0CC),
 )
 
 @Composable

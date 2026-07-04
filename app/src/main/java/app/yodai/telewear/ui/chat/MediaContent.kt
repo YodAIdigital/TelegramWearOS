@@ -109,7 +109,7 @@ fun LinkedText(text: String, fontScale: Float) {
                         tag = "url",
                         styles = TextLinkStyles(
                             SpanStyle(
-                                color = TeleWearColors.telegramBlue,
+                                color = TeleWearColors.accentLight,
                                 textDecoration = TextDecoration.Underline,
                             )
                         ),
@@ -146,9 +146,13 @@ private fun openLink(context: Context, url: String) {
     }
 }
 
-/** Voice notes and audio files: play button + progress + optional title. */
+/**
+ * Voice notes and audio files: play button + progress + optional title.
+ * The small button quick-plays; tapping the rest of the row opens the
+ * full player (speed control + bezel scrubbing).
+ */
 @Composable
-fun PlayableRow(messageId: Long, c: MsgContent.Playable, fontScale: Float) {
+fun PlayableRow(messageId: Long, c: MsgContent.Playable, fontScale: Float, onOpenPlayer: () -> Unit) {
     val graph = LocalAppGraph.current
     val path = rememberFilePath(c.fileId)
     val playingId by graph.voicePlayer.playingMessageId.collectAsState()
@@ -166,7 +170,12 @@ fun PlayableRow(messageId: Long, c: MsgContent.Playable, fontScale: Float) {
         }
     }
 
-    Column(modifier = Modifier.padding(top = 2.dp)) {
+    Column(
+        modifier = Modifier
+            .padding(top = 2.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onOpenPlayer),
+    ) {
         if (c.title != null) {
             Text(
                 c.title,
@@ -496,7 +505,7 @@ private fun PdfPage(renderer: PdfRenderer, lock: Mutex, index: Int) {
 }
 
 @Composable
-private fun androidx.compose.foundation.layout.BoxScope.CloseChip(onClose: () -> Unit) {
+internal fun androidx.compose.foundation.layout.BoxScope.CloseChip(onClose: () -> Unit) {
     Box(
         modifier = Modifier
             .align(Alignment.TopCenter)

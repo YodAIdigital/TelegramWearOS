@@ -52,4 +52,41 @@ class VoicePlayer(context: Context) {
         if (duration <= 0) return 0f
         return (player.currentPosition.toFloat() / duration).coerceIn(0f, 1f)
     }
+
+    // ---- full-player controls (speed, scrubbing, pause/resume) ----
+
+    private val _speed = MutableStateFlow(1f)
+    val speed: StateFlow<Float> = _speed
+
+    /** Playback speed 0.5–2.5×; persists across items until changed. */
+    fun setSpeed(value: Float) {
+        val s = value.coerceIn(0.5f, 2.5f)
+        player.setPlaybackSpeed(s)
+        _speed.value = s
+    }
+
+    val isPlaying: Boolean get() = player.isPlaying
+
+    fun positionMs(): Long = player.currentPosition.coerceAtLeast(0)
+
+    fun durationMs(): Long = if (player.duration > 0) player.duration else 0
+
+    /** Relative seek (rotary bezel scrubbing). */
+    fun seekBy(deltaMs: Long) {
+        val duration = durationMs()
+        if (duration <= 0) return
+        player.seekTo((player.currentPosition + deltaMs).coerceIn(0, duration))
+    }
+
+    /** Pause/resume without clearing the current item (unlike [toggle]). */
+    fun playPause() {
+        when {
+            player.isPlaying -> player.pause()
+            player.playbackState == Player.STATE_ENDED -> {
+                player.seekTo(0)
+                player.play()
+            }
+            else -> player.play()
+        }
+    }
 }

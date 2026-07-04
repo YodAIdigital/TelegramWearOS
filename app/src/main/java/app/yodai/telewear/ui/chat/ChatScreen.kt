@@ -129,6 +129,7 @@ fun ChatScreen(chatId: Long) {
     var viewImagePath by remember { mutableStateOf<String?>(null) }
     var videoFileId by remember { mutableStateOf<Int?>(null) }
     var pdfFileId by remember { mutableStateOf<Int?>(null) }
+    var playerTarget by remember { mutableStateOf<Pair<Long, MsgContent.Playable>?>(null) }
 
     val launchTextInput = rememberTextInputLauncher("Message") { vm.thread.sendText(it) }
 
@@ -164,6 +165,7 @@ fun ChatScreen(chatId: Long) {
                         onPhotoClick = { path -> viewImagePath = path },
                         onPlayVideo = { fileId -> videoFileId = fileId },
                         onOpenPdf = { fileId -> pdfFileId = fileId },
+                        onOpenPlayer = { id, playable -> playerTarget = id to playable },
                     )
                 }
 
@@ -251,6 +253,14 @@ fun ChatScreen(chatId: Long) {
         pdfFileId?.let { fileId ->
             PdfViewerOverlay(fileId = fileId, onClose = { pdfFileId = null })
         }
+
+        playerTarget?.let { (messageId, playable) ->
+            AudioPlayerOverlay(
+                messageId = messageId,
+                playable = playable,
+                onClose = { playerTarget = null },
+            )
+        }
     }
 }
 
@@ -299,6 +309,7 @@ private fun MessageBubble(
     onPhotoClick: (String) -> Unit,
     onPlayVideo: (Int) -> Unit,
     onOpenPdf: (Int) -> Unit,
+    onOpenPlayer: (Long, MsgContent.Playable) -> Unit,
 ) {
     val fontScale = LocalFontScale.current
     val out = msg.isOutgoing
@@ -336,7 +347,7 @@ private fun MessageBubble(
             when (val c = msg.content) {
                 is MsgContent.Text -> LinkedText(c.text, fontScale)
                 is MsgContent.Photo -> PhotoContent(c, fontScale, onPhotoClick)
-                is MsgContent.Playable -> PlayableRow(msg.id, c, fontScale)
+                is MsgContent.Playable -> PlayableRow(msg.id, c, fontScale, onOpenPlayer = { onOpenPlayer(msg.id, c) })
                 is MsgContent.Video -> VideoBubble(c, fontScale, onPlay = { onPlayVideo(c.fileId) })
                 is MsgContent.Sticker -> StickerBubble(c)
                 is MsgContent.Doc -> DocBubble(c, fontScale, onOpenPdf = { onOpenPdf(c.fileId) })
