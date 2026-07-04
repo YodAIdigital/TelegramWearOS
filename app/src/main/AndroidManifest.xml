@@ -97,5 +97,14 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+
+        <!-- PackageInstaller session status for self-updates. -->
+        <receiver
+            android:name=".settings.InstallResultReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="app.yodai.telewear.INSTALL_RESULT" />
+            </intent-filter>
+        </receiver>
     </application>
 </manifest>

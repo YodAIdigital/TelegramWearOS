@@ -1,9 +1,10 @@
 package app.yodai.telewear.settings
 
+import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInstaller
 import android.util.Log
-import androidx.core.content.FileProvider
 import app.yodai.telewear.BuildConfig
 import java.io.File
 import java.net.HttpURLConnection
@@ -14,8 +15,11 @@ import org.json.JSONObject
 
 /**
  * In-app updates from GitHub Releases (built by the repo's CI on every push).
- * Uses the unauthenticated API, so it requires the repo to be public; on a
- * private repo the check fails gracefully with "can't reach updates".
+ *
+ * Installs go through the PackageInstaller *session* API rather than an
+ * ACTION_VIEW intent: a self-update kills this process mid-flight, and only a
+ * system-owned session survives that. The user confirms once (dialog fired by
+ * [InstallResultReceiver]); the system finishes the install on its own.
  */
 class UpdateChecker(private val context: Context) {
 
@@ -52,27 +56,65 @@ class UpdateChecker(private val context: Context) {
             release.tag.removePrefix("v") != BuildConfig.VERSION_NAME
 
     /**
-     * Downloads the APK to the app cache and hands it to the system package
-     * installer (needs the "install unknown apps" grant on first use).
+     * Downloads the APK (verifying completeness) and commits it as a
+     * PackageInstaller session. Returns null on success, else a short error.
      */
-    suspend fun downloadAndInstall(apkUrl: String): Boolean = withContext(Dispatchers.IO) {
-        runCatching {
-            val file = File(context.cacheDir, "update.apk")
-            (URL(apkUrl).openConnection() as HttpURLConnection).apply {
+    suspend fun downloadAndInstall(
+        apkUrl: String,
+        onProgress: (Int) -> Unit,
+    ): String? = withContext(Dispatchers.IO) {
+        val file = File(context.cacheDir, "update.apk")
+        try {
+            val conn = (URL(apkUrl).openConnection() as HttpURLConnection).apply {
                 instanceFollowRedirects = true
-                connectTimeout = 10_000
-                readTimeout = 60_000
-            }.inputStream.use { input ->
-                file.outputStream().use { input.copyTo(it) }
+                connectTimeout = 15_000
+                readTimeout = 30_000
             }
-            val uri = FileProvider.getUriForFile(context, "${BuildConfig.APPLICATION_ID}.fileprovider", file)
-            context.startActivity(
-                Intent(Intent.ACTION_VIEW)
-                    .setDataAndType(uri, "application/vnd.android.package-archive")
-                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-            true
-        }.onFailure { Log.w(TAG, "update install failed: $it") }.getOrDefault(false)
+            val expected = conn.contentLengthLong
+            conn.inputStream.use { input ->
+                file.outputStream().use { out ->
+                    val buf = ByteArray(64 * 1024)
+                    var copied = 0L
+                    while (true) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        copied += n
+                        if (expected > 0) onProgress(((copied * 100) / expected).toInt().coerceIn(0, 100))
+                    }
+                }
+            }
+            if (expected > 0 && file.length() != expected) {
+                return@withContext "Download incomplete — try again"
+            }
+
+            val installer = context.packageManager.packageInstaller
+            val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+                .apply {
+                    setAppPackageName(BuildConfig.APPLICATION_ID)
+                    setSize(file.length())
+                }
+            val sessionId = installer.createSession(params)
+            installer.openSession(sessionId).use { session ->
+                session.openWrite("update.apk", 0, file.length()).use { out ->
+                    file.inputStream().use { it.copyTo(out) }
+                    session.fsync(out)
+                }
+                val callback = PendingIntent.getBroadcast(
+                    context,
+                    sessionId,
+                    Intent(InstallResultReceiver.ACTION).setPackage(context.packageName),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
+                )
+                session.commit(callback.intentSender)
+            }
+            null
+        } catch (t: Throwable) {
+            Log.w(TAG, "update install failed", t)
+            "Update failed: ${t.message?.take(60) ?: "unknown error"}"
+        } finally {
+            runCatching { file.delete() }
+        }
     }
 
     companion object {

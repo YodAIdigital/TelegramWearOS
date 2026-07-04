@@ -141,9 +141,11 @@ class SettingsViewModel(private val graph: AppGraph) : ViewModel() {
         val apk = pendingApk
         if (apk != null) {
             updateStatus.value = "Downloading…"
-            val ok = updater.downloadAndInstall(apk)
-            updateStatus.value = if (ok) "Installer opened" else "Download failed"
-            pendingApk = null
+            val error = updater.downloadAndInstall(apk) { pct ->
+                updateStatus.value = "Downloading… $pct%"
+            }
+            updateStatus.value = error ?: "Confirm install on screen"
+            if (error == null) pendingApk = null // keep the URL on failure so retry works
             return@launch
         }
         updateStatus.value = "Checking…"
