@@ -54,7 +54,7 @@ class InstallResultReceiver : BroadcastReceiver() {
                 NOTE_ID,
                 NotificationCompat.Builder(context, CHANNEL)
                     .setSmallIcon(R.drawable.ic_notification)
-                    .setContentTitle("TeleWear update failed")
+                    .setContentTitle("YodChat update failed")
                     .setContentText(msg)
                     .setAutoCancel(true)
                     .build(),

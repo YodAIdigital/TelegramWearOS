@@ -1,4 +1,4 @@
-# TeleWear — Telegram for Wear OS
+# YodChat — Telegram for Wear OS
 
 An unofficial, standalone **Telegram client for Wear OS**, designed for the **Samsung Galaxy Watch 8 (44 mm)** and built with Jetpack **Compose for Wear OS (Material 3)** + **TDLib** (Telegram's official client library, via [tdl-coroutines](https://github.com/g000sha256/tdl-coroutines)).
 
@@ -17,9 +17,9 @@ An unofficial, standalone **Telegram client for Wear OS**, designed for the **Sa
 
 ## How it connects to your phone's Telegram
 
-The official Telegram app has no companion API, so TeleWear is a **standalone client that logs into your own Telegram account** as an additional session (exactly like Telegram Desktop does):
+The official Telegram app has no companion API, so YodChat is a **standalone client that logs into your own Telegram account** as an additional session (exactly like Telegram Desktop does):
 
-1. Launch TeleWear on the watch → it shows a **QR code**.
+1. Launch YodChat on the watch → it shows a **QR code**.
 2. On your phone (S24 Ultra) open **Telegram → Settings → Devices → Link Desktop Device**.
 3. Scan the watch screen. Done — the watch shows the same chats, groups and messages as your phone.
 
@@ -92,8 +92,8 @@ Two complementary paths; pick per situation:
 
 | Scenario | What delivers the notification |
 |---|---|
-| **Watch near phone** (default) | The official Telegram app on the phone posts notifications and Wear OS **bridges them to the watch automatically** — inline reply included, zero watch battery cost. Keep TeleWear's *Stay connected* off. |
-| **Watch away from phone** (Wi-Fi/LTE) | Enable **Settings → Stay connected** in TeleWear. A foreground service keeps TDLib online and TeleWear posts its own notifications with Reply/Mark-read. Costs battery. |
+| **Watch near phone** (default) | The official Telegram app on the phone posts notifications and Wear OS **bridges them to the watch automatically** — inline reply included, zero watch battery cost. Keep YodChat's *Stay connected* off. |
+| **Watch away from phone** (Wi-Fi/LTE) | Enable **Settings → Stay connected** in YodChat. A foreground service keeps TDLib online and YodChat posts its own notifications with Reply/Mark-read. Costs battery. |
 
 Tip: if you enable *Stay connected* while the phone is also nearby, you may see duplicate notifications (one bridged, one local) — mute one side.
 

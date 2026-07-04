@@ -23,7 +23,7 @@ class DebugSendReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val graph = (context.applicationContext as TeleWearApp).graph
-        val text = intent.getStringExtra("text") ?: "TeleWear self-test"
+        val text = intent.getStringExtra("text") ?: "YodChat self-test"
         val pending = goAsync()
         graph.appScope.launch {
             try {

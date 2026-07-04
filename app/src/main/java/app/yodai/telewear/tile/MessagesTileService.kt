@@ -67,7 +67,7 @@ class MessagesTileService : TileService() {
             .addContent(spacer(6f))
 
         if (data.top.isEmpty()) {
-            column.addContent(text("Open TeleWear", sizeSp = 12f, color = COLOR_MUTED))
+            column.addContent(text("Open YodChat", sizeSp = 12f, color = COLOR_MUTED))
         } else {
             data.top.forEach { entry ->
                 val label = if (entry.unread > 0) "${entry.title}  ·  ${entry.unread}" else entry.title

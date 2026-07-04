@@ -405,7 +405,7 @@ fun SettingsScreen(onQuickReplies: () -> Unit) {
 
             item {
                 Text(
-                    "TeleWear ${BuildConfig.VERSION_NAME}\nUnofficial Telegram client",
+                    "YodChat ${BuildConfig.VERSION_NAME}\nUnofficial Telegram client",
                     fontSize = 9.sp,
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
