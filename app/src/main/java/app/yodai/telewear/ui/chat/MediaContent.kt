@@ -31,6 +31,7 @@ import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Description
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.foundation.focusable
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -38,6 +39,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -45,6 +47,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.rotary.onRotaryScrollEvent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -341,7 +346,11 @@ fun DocBubble(c: MsgContent.Doc, fontScale: Float, onOpenPdf: () -> Unit) {
     }
 }
 
-/** Fullscreen video playback: downloads, then plays; tap toggles pause, X closes. */
+/**
+ * Fullscreen video playback with the same transport controls as audio:
+ * tap toggles the control overlay (auto-hides), speed slider 0.5–2.5×,
+ * rotary bezel scrubbing. Starts at the default speed from Settings.
+ */
 @Composable
 fun VideoPlayerOverlay(fileId: Int, onClose: () -> Unit) {
     val graph = LocalAppGraph.current
@@ -355,12 +364,22 @@ fun VideoPlayerOverlay(fileId: Int, onClose: () -> Unit) {
         if (p == null) failed = true else path = p
     }
 
+    val focusRequester = remember { FocusRequester() }
+    var seekRequest by remember { mutableStateOf(0L) }
+
     Box(
         Modifier
             .fillMaxSize()
-            .background(Color.Black),
+            .background(Color.Black)
+            .onRotaryScrollEvent { event ->
+                seekRequest += (event.verticalScrollPixels * ROTARY_SEEK_MS_PER_PIXEL).toLong()
+                true
+            }
+            .focusRequester(focusRequester)
+            .focusable(),
         contentAlignment = Alignment.Center,
     ) {
+        LaunchedEffect(Unit) { focusRequester.requestFocus() }
         val p = path
         when {
             failed -> Text("Couldn't load video", fontSize = 11.sp)
@@ -369,6 +388,14 @@ fun VideoPlayerOverlay(fileId: Int, onClose: () -> Unit) {
                 Text("Downloading…", fontSize = 10.sp, modifier = Modifier.padding(top = 8.dp))
             }
             else -> {
+                // Session default speed comes from the shared player (seeded by Settings).
+                var speed by remember { mutableFloatStateOf(graph.voicePlayer.speed.value) }
+                var playing by remember { mutableStateOf(true) }
+                var positionMs by remember { mutableLongStateOf(0L) }
+                var durationMs by remember { mutableLongStateOf(0L) }
+                var showControls by remember { mutableStateOf(true) }
+                var controlsTick by remember { mutableStateOf(0) }
+
                 val player = remember(p) {
                     ExoPlayer.Builder(context).build().apply {
                         setMediaItem(MediaItem.fromUri(Uri.fromFile(File(p))))
@@ -379,6 +406,38 @@ fun VideoPlayerOverlay(fileId: Int, onClose: () -> Unit) {
                 DisposableEffect(p) {
                     onDispose { player.release() }
                 }
+                LaunchedEffect(speed) { player.setPlaybackSpeed(speed) }
+
+                // Apply rotary seeks on the main-thread composition loop.
+                LaunchedEffect(seekRequest) {
+                    if (seekRequest != 0L && player.duration > 0) {
+                        player.seekTo((player.currentPosition + seekRequest).coerceIn(0, player.duration))
+                        seekRequest = 0L
+                    }
+                }
+
+                // Poll transport state; auto-close at the end.
+                LaunchedEffect(player) {
+                    while (isActive) {
+                        positionMs = player.currentPosition.coerceAtLeast(0)
+                        if (player.duration > 0) durationMs = player.duration
+                        playing = player.isPlaying
+                        if (player.playbackState == Player.STATE_ENDED) {
+                            onClose()
+                            break
+                        }
+                        delay(150)
+                    }
+                }
+
+                // Controls auto-hide a few seconds after they were last shown.
+                LaunchedEffect(controlsTick, showControls) {
+                    if (showControls) {
+                        delay(4000)
+                        showControls = false
+                    }
+                }
+
                 AndroidView(
                     factory = { ctx ->
                         PlayerView(ctx).apply {
@@ -388,15 +447,36 @@ fun VideoPlayerOverlay(fileId: Int, onClose: () -> Unit) {
                     },
                     modifier = Modifier
                         .fillMaxSize()
-                        .clickable { if (player.isPlaying) player.pause() else player.play() },
+                        .clickable {
+                            showControls = !showControls
+                            controlsTick++
+                        },
                 )
-                LaunchedEffect(player) {
-                    while (isActive) {
-                        if (player.playbackState == Player.STATE_ENDED) {
-                            onClose()
-                            break
+
+                if (showControls) {
+                    Box(
+                        Modifier
+                            .fillMaxSize()
+                            .background(Color(0x88000000)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Column(modifier = Modifier.padding(horizontal = 26.dp)) {
+                            PlaybackControls(
+                                ready = true,
+                                playing = playing,
+                                positionMs = positionMs,
+                                durationMs = durationMs,
+                                speed = speed,
+                                onPlayPause = {
+                                    controlsTick++
+                                    if (player.isPlaying) player.pause() else player.play()
+                                },
+                                onSpeedChange = {
+                                    controlsTick++
+                                    speed = it
+                                },
+                            )
                         }
-                        delay(300)
                     }
                 }
             }

@@ -13,6 +13,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 /**
  * Manual dependency graph. One instance per process, owned by [TeleWearApp].
@@ -20,6 +22,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
  */
 class AppGraph(app: Application) {
 
+    val appContext: Application = app
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     val settings = SettingsRepository(app)
@@ -38,4 +41,11 @@ class AppGraph(app: Application) {
     val pendingOpenChatId = MutableStateFlow<Long?>(null)
 
     val notifier = MessageNotifier(app, core, chats, settings, activeChatId, appScope)
+
+    init {
+        // Apply the saved default playback speed (ExoPlayer must be touched on main).
+        appScope.launch(Dispatchers.Main) {
+            voicePlayer.setSpeed(settings.flow.first().playbackSpeed)
+        }
+    }
 }

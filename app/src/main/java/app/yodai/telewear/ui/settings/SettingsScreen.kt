@@ -24,15 +24,19 @@ import androidx.wear.compose.material3.ButtonDefaults
 import androidx.wear.compose.material3.ListHeader
 import androidx.wear.compose.material3.MaterialTheme
 import androidx.wear.compose.material3.ScreenScaffold
+import androidx.wear.compose.material3.Slider
 import androidx.wear.compose.material3.SwitchButton
 import androidx.wear.compose.material3.Text
 import app.yodai.telewear.AppGraph
 import app.yodai.telewear.BuildConfig
 import app.yodai.telewear.settings.AppSettings
 import app.yodai.telewear.settings.FONT_SCALE_STEPS
+import app.yodai.telewear.telegram.getOrNull
 import app.yodai.telewear.ui.components.LocalAppGraph
 import app.yodai.telewear.ui.theme.TeleWearColors
+import dev.g000sha256.tdl.dto.FileType
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -53,8 +57,68 @@ class SettingsViewModel(private val graph: AppGraph) : ViewModel() {
         graph.settings.setFontScale(next.first)
     }
 
+    /** Persists the default and applies it to the live player immediately. */
+    fun setPlaybackSpeed(v: Float) = viewModelScope.launch {
+        graph.settings.setPlaybackSpeed(v)
+        graph.voicePlayer.setSpeed(v)
+    }
+
+    // ---- storage ----
+
+    val mediaCacheBytes = MutableStateFlow<Long?>(null)
+    val clearingCache = MutableStateFlow(false)
+
+    init {
+        refreshStorage()
+    }
+
+    fun refreshStorage() = viewModelScope.launch {
+        mediaCacheBytes.value = graph.core.client.getStorageStatisticsFast().getOrNull()?.filesSize
+    }
+
+    /**
+     * Deletes all downloaded media (photos, voice/audio, videos, documents)
+     * through TDLib's storage optimizer, which keeps its database consistent —
+     * anything still needed simply re-downloads on view.
+     */
+    fun clearDownloads() = viewModelScope.launch {
+        if (clearingCache.value) return@launch
+        clearingCache.value = true
+        try {
+            graph.core.client.optimizeStorage(
+                size = 0,
+                ttl = 0,
+                count = 0,
+                immunityDelay = 0,
+                fileTypes = emptyArray<FileType>(),
+                chatIds = LongArray(0),
+                excludeChatIds = LongArray(0),
+                returnDeletedFileStatistics = false,
+                chatLimit = 100,
+            )
+            graph.files.clearCache()
+            // Our own outgoing voice recordings live in the app cache dir.
+            graph.appContext.cacheDir.listFiles()
+                ?.filter { it.name.startsWith("voice_") }
+                ?.forEach { it.delete() }
+            refreshStorage()
+        } finally {
+            clearingCache.value = false
+        }
+    }
+
     fun logout() = graph.core.logout()
 }
+
+private fun formatBytes(bytes: Long): String = when {
+    bytes >= 1_073_741_824 -> "%.2f GB".format(bytes / 1_073_741_824f)
+    bytes >= 1_048_576 -> "%.0f MB".format(bytes / 1_048_576f)
+    bytes >= 1024 -> "${bytes / 1024} KB"
+    else -> "$bytes B"
+}
+
+private fun formatSpeedLabel(s: Float): String =
+    if (s == s.toInt().toFloat()) "${s.toInt()}×" else "${"%.2f".format(s).trimEnd('0').trimEnd('.')}×"
 
 @Composable
 fun SettingsScreen() {
@@ -123,6 +187,52 @@ fun SettingsScreen() {
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Stay connected", fontSize = 13.sp) },
                     secondaryLabel = { Text("Background sync — uses battery", fontSize = 10.sp) },
+                )
+            }
+
+            item { ListHeader { Text("Playback") } }
+
+            item {
+                Slider(
+                    value = settings.playbackSpeed,
+                    onValueChange = { vm.setPlaybackSpeed(it) },
+                    steps = 7,
+                    valueRange = 0.5f..2.5f,
+                    segmented = false,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            item {
+                Text(
+                    "Default speed ${formatSpeedLabel(settings.playbackSpeed)}",
+                    fontSize = 10.sp,
+                    textAlign = TextAlign.Center,
+                    color = TeleWearColors.accentLight,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+
+            item { ListHeader { Text("Storage") } }
+
+            item {
+                val cacheBytes by vm.mediaCacheBytes.collectAsState()
+                val clearing by vm.clearingCache.collectAsState()
+                Button(
+                    onClick = { vm.clearDownloads() },
+                    enabled = !clearing,
+                    colors = ButtonDefaults.filledTonalButtonColors(),
+                    modifier = Modifier.fillMaxWidth(),
+                    label = {
+                        Text(
+                            when {
+                                clearing -> "Clearing…"
+                                cacheBytes != null -> "Media cache: ${formatBytes(cacheBytes!!)}"
+                                else -> "Media cache"
+                            },
+                            fontSize = 13.sp,
+                        )
+                    },
+                    secondaryLabel = { Text("Tap to clear downloads", fontSize = 10.sp) },
                 )
             }
 

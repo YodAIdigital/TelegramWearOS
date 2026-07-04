@@ -21,4 +21,7 @@ class FileRepository(private val core: TelegramCore) {
         cache[fileId] = path
         return path
     }
+
+    /** Invalidate cached paths after TDLib's storage optimizer deletes the files. */
+    fun clearCache() = cache.clear()
 }

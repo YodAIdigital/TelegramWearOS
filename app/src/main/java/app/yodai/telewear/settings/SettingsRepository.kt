@@ -15,6 +15,7 @@ data class AppSettings(
     val showPreview: Boolean = true,
     val fontScale: Float = 1.0f,
     val keepAlive: Boolean = false,
+    val playbackSpeed: Float = 1.0f,
 )
 
 /** Font size steps offered in Settings; scale multiplies message/chat text sizes. */
@@ -27,6 +28,7 @@ class SettingsRepository(private val context: Context) {
         val preview = booleanPreferencesKey("show_preview")
         val fontScale = floatPreferencesKey("font_scale")
         val keepAlive = booleanPreferencesKey("keep_alive")
+        val playbackSpeed = floatPreferencesKey("playback_speed")
     }
 
     val flow: Flow<AppSettings> = context.dataStore.data.map { p ->
@@ -35,6 +37,7 @@ class SettingsRepository(private val context: Context) {
             showPreview = p[Keys.preview] ?: true,
             fontScale = p[Keys.fontScale] ?: 1.0f,
             keepAlive = p[Keys.keepAlive] ?: false,
+            playbackSpeed = p[Keys.playbackSpeed] ?: 1.0f,
         )
     }
 
@@ -42,4 +45,5 @@ class SettingsRepository(private val context: Context) {
     suspend fun setShowPreview(v: Boolean) = context.dataStore.edit { it[Keys.preview] = v }
     suspend fun setFontScale(v: Float) = context.dataStore.edit { it[Keys.fontScale] = v }
     suspend fun setKeepAlive(v: Boolean) = context.dataStore.edit { it[Keys.keepAlive] = v }
+    suspend fun setPlaybackSpeed(v: Float) = context.dataStore.edit { it[Keys.playbackSpeed] = v }
 }

@@ -48,7 +48,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 
 /** Milliseconds of seek per rotary pixel — one bezel detent ≈ 3 s. */
-private const val ROTARY_SEEK_MS_PER_PIXEL = 25f
+internal const val ROTARY_SEEK_MS_PER_PIXEL = 25f
 
 /**
  * Fullscreen audio player for voice notes and audio files:
@@ -68,14 +68,12 @@ fun AudioPlayerOverlay(messageId: Long, playable: MsgContent.Playable, onClose: 
     var durationMs by remember { mutableLongStateOf(playable.duration * 1000L) }
     var playing by remember { mutableStateOf(false) }
 
-    // Start this item when it's downloaded (unless it's already the active one).
     LaunchedEffect(path) {
         if (path != null && player.playingMessageId.value != messageId) {
             player.toggle(messageId, path)
         }
     }
 
-    // Poll playback state for the UI.
     LaunchedEffect(isCurrent) {
         while (isActive) {
             if (isCurrent) {
@@ -89,7 +87,6 @@ fun AudioPlayerOverlay(messageId: Long, playable: MsgContent.Playable, onClose: 
         }
     }
 
-    // Rotary bezel scrubs through the file.
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
 
@@ -123,79 +120,106 @@ fun AudioPlayerOverlay(messageId: Long, playable: MsgContent.Playable, onClose: 
                 textAlign = TextAlign.Center,
                 color = TeleWearColors.onBubble,
             )
-
-            // Position bar (bezel scrubs it)
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .height(4.dp)
-                    .clip(RoundedCornerShape(2.dp))
-                    .background(Color(0x33FAF8F5)),
-            ) {
-                val fraction = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
-                Box(
-                    Modifier
-                        .fillMaxWidth(fraction)
-                        .height(4.dp)
-                        .background(MaterialTheme.colorScheme.primary),
-                )
-            }
-            Text(
-                "${formatMs(positionMs)} / ${formatMs(durationMs)}  ·  bezel to seek",
-                fontSize = 9.sp,
-                color = TeleWearColors.timestamp,
-            )
-
-            // Play / pause
-            Box(
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)
-                    .clickable {
-                        if (!isCurrent) {
-                            path?.let { player.toggle(messageId, it) }
-                        } else {
-                            player.playPause()
-                        }
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                if (path == null) {
-                    CircularProgressIndicator(modifier = Modifier.size(22.dp))
-                } else {
-                    Icon(
-                        if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                        contentDescription = if (playing) "Pause" else "Play",
-                        tint = Color.White,
-                        modifier = Modifier.size(26.dp),
-                    )
-                }
-            }
-
-            // Speed: 0.5× … 2.5× in 0.25 steps
-            Slider(
-                value = speed,
-                onValueChange = { player.setSpeed(it) },
-                steps = 7,
-                valueRange = 0.5f..2.5f,
-                segmented = false,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Text(
-                "Speed ${formatSpeed(speed)}",
-                fontSize = 10.sp,
-                color = TeleWearColors.accentLight,
+            PlaybackControls(
+                ready = path != null,
+                playing = playing,
+                positionMs = positionMs,
+                durationMs = durationMs,
+                speed = speed,
+                onPlayPause = {
+                    if (!isCurrent) {
+                        path?.let { player.toggle(messageId, it) }
+                    } else {
+                        player.playPause()
+                    }
+                },
+                onSpeedChange = { player.setSpeed(it) },
             )
         }
         CloseChip(onClose)
     }
 }
 
-private fun formatMs(ms: Long): String {
+/**
+ * Shared transport controls: position bar, timing, play/pause, speed slider.
+ * Used by the audio player and the video player overlays.
+ */
+@Composable
+internal fun PlaybackControls(
+    ready: Boolean,
+    playing: Boolean,
+    positionMs: Long,
+    durationMs: Long,
+    speed: Float,
+    onPlayPause: () -> Unit,
+    onSpeedChange: (Float) -> Unit,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(4.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(Color(0x33FAF8F5)),
+        ) {
+            val fraction = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
+            Box(
+                Modifier
+                    .fillMaxWidth(fraction)
+                    .height(4.dp)
+                    .background(MaterialTheme.colorScheme.primary),
+            )
+        }
+        Text(
+            "${formatMs(positionMs)} / ${formatMs(durationMs)}  ·  bezel to seek",
+            fontSize = 9.sp,
+            color = TeleWearColors.timestamp,
+        )
+
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(MaterialTheme.colorScheme.primary)
+                .clickable(onClick = onPlayPause),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (!ready) {
+                CircularProgressIndicator(modifier = Modifier.size(22.dp))
+            } else {
+                Icon(
+                    if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                    contentDescription = if (playing) "Pause" else "Play",
+                    tint = Color.White,
+                    modifier = Modifier.size(26.dp),
+                )
+            }
+        }
+
+        Slider(
+            value = speed,
+            onValueChange = onSpeedChange,
+            steps = 7,
+            valueRange = 0.5f..2.5f,
+            segmented = false,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            "Speed ${formatSpeed(speed)}",
+            fontSize = 10.sp,
+            color = TeleWearColors.accentLight,
+        )
+    }
+}
+
+internal fun formatMs(ms: Long): String {
     val totalSec = (ms / 1000).toInt()
     return "%d:%02d".format(totalSec / 60, totalSec % 60)
 }
 
-private fun formatSpeed(s: Float): String =
+internal fun formatSpeed(s: Float): String =
     if (s == s.toInt().toFloat()) "${s.toInt()}×" else "${"%.2f".format(s).trimEnd('0').trimEnd('.')}×"
