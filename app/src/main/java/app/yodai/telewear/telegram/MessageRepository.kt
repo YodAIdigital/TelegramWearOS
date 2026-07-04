@@ -187,6 +187,20 @@ class ChatThread(
     }
 
     /** Adds the emoji reaction, or removes it if it's already ours. */
+    /**
+     * Vote for a poll option (0-based index); tapping an already-chosen option
+     * retracts the vote. Result arrives back through UpdateMessageContent.
+     */
+    fun votePoll(messageId: Long, optionIndex: Int, retract: Boolean) {
+        core.async { client ->
+            client.setPollAnswer(
+                chatId = chatId,
+                messageId = messageId,
+                optionIds = if (retract) IntArray(0) else intArrayOf(optionIndex),
+            )
+        }
+    }
+
     fun toggleReaction(messageId: Long, emoji: String) {
         val mine = raw.value.firstOrNull { it.id == messageId }
             ?.reactions?.any { it.emoji == emoji && it.chosen } == true

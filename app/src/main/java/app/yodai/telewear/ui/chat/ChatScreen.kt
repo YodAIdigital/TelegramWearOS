@@ -163,7 +163,7 @@ fun ChatScreen(chatId: Long) {
                 // Index 0 (visual bottom): composer.
                 item {
                     ComposerRow(
-                        quickReplies = appSettings.quickReplyList(),
+                        quickReplies = if (appSettings.quickRepliesEnabled) appSettings.quickReplyList() else emptyList(),
                         onQuickReply = { reply ->
                             buzz(context)
                             vm.thread.sendText(reply)
@@ -183,6 +183,10 @@ fun ChatScreen(chatId: Long) {
                         onPlayVideo = { fileId -> videoFileId = fileId },
                         onOpenPdf = { fileId -> pdfFileId = fileId },
                         onOpenPlayer = { id, playable -> playerTarget = id to playable },
+                        onVotePoll = { id, index, retract ->
+                            buzz(context)
+                            vm.thread.votePoll(id, index, retract)
+                        },
                         onLongPress = {
                             buzz(context, 25)
                             menuTarget = it
@@ -423,10 +427,31 @@ private fun MessageBubble(
     onPlayVideo: (Int) -> Unit,
     onOpenPdf: (Int) -> Unit,
     onOpenPlayer: (Long, MsgContent.Playable) -> Unit,
+    onVotePoll: (Long, Int, Boolean) -> Unit,
     onLongPress: (MsgItem) -> Unit,
 ) {
     val fontScale = LocalFontScale.current
     val out = msg.isOutgoing
+
+    // System/group events render as a centered caption, not a bubble.
+    (msg.content as? MsgContent.Service)?.let { service ->
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 3.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                (senderName?.let { "$it " } ?: "") + service.label,
+                fontSize = 9.sp,
+                fontStyle = FontStyle.Italic,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
+        return
+    }
+
     Box(
         Modifier
             .fillMaxWidth()
@@ -466,6 +491,12 @@ private fun MessageBubble(
                 is MsgContent.Video -> VideoBubble(c, fontScale, onPlay = { onPlayVideo(c.fileId) })
                 is MsgContent.Sticker -> StickerBubble(c)
                 is MsgContent.Doc -> DocBubble(c, fontScale, onOpenPdf = { onOpenPdf(c.fileId) })
+                is MsgContent.Poll -> PollContent(c, fontScale, onVote = { index, retract ->
+                    onVotePoll(msg.id, index, retract)
+                })
+                is MsgContent.Location -> LocationContent(c, fontScale)
+                is MsgContent.Contact -> ContactContent(c, fontScale)
+                is MsgContent.Service -> Unit // handled above
                 is MsgContent.Other -> Text(
                     c.label,
                     fontSize = 12.sp * fontScale,

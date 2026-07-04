@@ -53,7 +53,6 @@ class SettingsViewModel(private val graph: AppGraph) : ViewModel() {
     fun setShowPreview(v: Boolean) = viewModelScope.launch { graph.settings.setShowPreview(v) }
     fun setKeepAlive(v: Boolean) = viewModelScope.launch { graph.settings.setKeepAlive(v) }
     fun setSmartDedupe(v: Boolean) = viewModelScope.launch { graph.settings.setSmartDedupe(v) }
-    fun setQuickReplies(v: String) = viewModelScope.launch { graph.settings.setQuickReplies(v) }
 
     /** Battery floor for keep-alive: 0 (never pause) → 50% in steps of 10. */
     fun cycleKeepAliveBattery() = viewModelScope.launch {
@@ -172,7 +171,7 @@ private fun formatSpeedLabel(s: Float): String =
     if (s == s.toInt().toFloat()) "${s.toInt()}×" else "${"%.2f".format(s).trimEnd('0').trimEnd('.')}×"
 
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(onQuickReplies: () -> Unit) {
     val graph = LocalAppGraph.current
     val vm: SettingsViewModel = viewModel { SettingsViewModel(graph) }
     val settings by vm.settings.collectAsState()
@@ -231,18 +230,16 @@ fun SettingsScreen() {
             }
 
             item {
-                val current = settings.quickReplies
-                val editReplies = rememberTextInputLauncher("Quick replies (separate with ;)") {
-                    vm.setQuickReplies(it)
-                }
                 Button(
-                    onClick = editReplies,
+                    onClick = onQuickReplies,
                     colors = ButtonDefaults.filledTonalButtonColors(),
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Quick replies", fontSize = 13.sp) },
                     secondaryLabel = {
                         Text(
-                            current.split(';').joinToString(" · ") { it.trim() },
+                            if (settings.quickRepliesEnabled) {
+                                settings.quickReplies.split(';').joinToString(" · ") { it.trim() }
+                            } else "Off",
                             fontSize = 10.sp,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,

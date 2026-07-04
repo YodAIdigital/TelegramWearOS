@@ -1,13 +1,36 @@
 package app.yodai.telewear.telegram
 
 import dev.g000sha256.tdl.dto.Message
+import dev.g000sha256.tdl.dto.MessageAnimatedEmoji
 import dev.g000sha256.tdl.dto.MessageAnimation
 import dev.g000sha256.tdl.dto.MessageAudio
+import dev.g000sha256.tdl.dto.MessageBasicGroupChatCreate
 import dev.g000sha256.tdl.dto.MessageCall
+import dev.g000sha256.tdl.dto.MessageChatAddMembers
+import dev.g000sha256.tdl.dto.MessageChatChangePhoto
+import dev.g000sha256.tdl.dto.MessageChatChangeTitle
+import dev.g000sha256.tdl.dto.MessageChatDeleteMember
+import dev.g000sha256.tdl.dto.MessageChatJoinByLink
+import dev.g000sha256.tdl.dto.MessageContact
+import dev.g000sha256.tdl.dto.MessageContactRegistered
 import dev.g000sha256.tdl.dto.MessageContent
+import dev.g000sha256.tdl.dto.MessageDice
 import dev.g000sha256.tdl.dto.MessageDocument
+import dev.g000sha256.tdl.dto.MessageForumTopicCreated
+import dev.g000sha256.tdl.dto.MessageGiveaway
 import dev.g000sha256.tdl.dto.MessageInteractionInfo
+import dev.g000sha256.tdl.dto.MessageInvoice
+import dev.g000sha256.tdl.dto.MessageLocation
+import dev.g000sha256.tdl.dto.MessagePaidMedia
 import dev.g000sha256.tdl.dto.MessagePhoto
+import dev.g000sha256.tdl.dto.MessagePinMessage
+import dev.g000sha256.tdl.dto.MessagePoll
+import dev.g000sha256.tdl.dto.MessageStory
+import dev.g000sha256.tdl.dto.MessageSupergroupChatCreate
+import dev.g000sha256.tdl.dto.MessageVenue
+import dev.g000sha256.tdl.dto.MessageVideoChatEnded
+import dev.g000sha256.tdl.dto.MessageVideoChatStarted
+import dev.g000sha256.tdl.dto.PollTypeQuiz
 import dev.g000sha256.tdl.dto.MessageSenderUser
 import dev.g000sha256.tdl.dto.MessageSendingStateFailed
 import dev.g000sha256.tdl.dto.MessageSendingStatePending
@@ -50,6 +73,8 @@ fun MsgContent.speakableText(): String? = when (this) {
     is MsgContent.Text -> text
     is MsgContent.Photo -> caption.ifBlank { null }
     is MsgContent.Video -> caption.ifBlank { null }
+    is MsgContent.Poll -> question
+    is MsgContent.Contact -> "$name, $phone"
     else -> null
 }
 
@@ -103,8 +128,32 @@ sealed interface MsgContent {
 
     data class Doc(val fileId: Int, val fileName: String, val mime: String, val size: Long) : MsgContent
 
+    data class Poll(
+        val question: String,
+        val options: List<PollOptionItem>,
+        val totalVotes: Int,
+        val isQuiz: Boolean,
+        val closed: Boolean,
+        val voted: Boolean,
+    ) : MsgContent
+
+    data class Location(
+        val lat: Double,
+        val lon: Double,
+        val title: String?,
+        val address: String?,
+        val live: Boolean,
+    ) : MsgContent
+
+    data class Contact(val name: String, val phone: String) : MsgContent
+
+    /** Group/system events ("X joined", "pinned a message") — centered, no bubble. */
+    data class Service(val label: String) : MsgContent
+
     data class Other(val label: String) : MsgContent
 }
+
+data class PollOptionItem(val text: String, val percent: Int, val votes: Int, val chosen: Boolean)
 
 fun Message.toItem(): MsgItem = MsgItem(
     id = id,
@@ -188,7 +237,76 @@ fun MessageContent.toMsgContent(): MsgContent = when (this) {
         size = document.document.size,
     )
 
+    // A lone emoji ("👍") arrives as its own type carrying a sticker — reuse the
+    // sticker pipeline (animated ones loop via Lottie), else render as big text.
+    is MessageAnimatedEmoji -> {
+        val s = animatedEmoji.sticker
+        if (s != null) {
+            MsgContent.Sticker(
+                emoji = emoji,
+                fileId = s.sticker.id,
+                isAnimated = s.format is StickerFormatTgs,
+                thumbFileId = s.thumbnail?.file?.id,
+            )
+        } else {
+            MsgContent.Text(emoji)
+        }
+    }
+
+    is MessagePoll -> MsgContent.Poll(
+        question = poll.question.text,
+        options = poll.options.filterNotNull().map {
+            PollOptionItem(it.text.text, it.votePercentage, it.voterCount, it.isChosen)
+        },
+        totalVotes = poll.totalVoterCount,
+        isQuiz = poll.type is PollTypeQuiz,
+        closed = poll.isClosed,
+        voted = poll.options.filterNotNull().any { it.isChosen },
+    )
+
+    is MessageLocation -> MsgContent.Location(
+        lat = location.latitude,
+        lon = location.longitude,
+        title = null,
+        address = null,
+        live = false,
+    )
+
+    is MessageVenue -> MsgContent.Location(
+        lat = venue.location.latitude,
+        lon = venue.location.longitude,
+        title = venue.title,
+        address = venue.address,
+        live = false,
+    )
+
+    is MessageContact -> MsgContent.Contact(
+        name = listOf(contact.firstName, contact.lastName).filter { it.isNotBlank() }.joinToString(" ")
+            .ifBlank { contact.phoneNumber },
+        phone = contact.phoneNumber,
+    )
+
+    is MessageDice -> MsgContent.Text("$emoji $value")
+
+    is MessageStory -> MsgContent.Other("📖 Story — view on phone")
+    is MessageInvoice -> MsgContent.Other("🧾 Invoice")
+    is MessageGiveaway -> MsgContent.Other("🎁 Giveaway")
+    is MessagePaidMedia -> MsgContent.Other("⭐ Paid media")
     is MessageCall -> MsgContent.Other("📞 Call")
+
+    is MessagePinMessage -> MsgContent.Service("pinned a message")
+    is MessageChatChangeTitle -> MsgContent.Service("renamed the group to \"$title\"")
+    is MessageChatChangePhoto -> MsgContent.Service("changed the group photo")
+    is MessageChatAddMembers -> MsgContent.Service("joined the group")
+    is MessageChatDeleteMember -> MsgContent.Service("left the group")
+    is MessageChatJoinByLink -> MsgContent.Service("joined via invite link")
+    is MessageVideoChatStarted -> MsgContent.Service("started a video chat")
+    is MessageVideoChatEnded -> MsgContent.Service("video chat ended")
+    is MessageContactRegistered -> MsgContent.Service("joined Telegram")
+    is MessageBasicGroupChatCreate -> MsgContent.Service("created the group")
+    is MessageSupergroupChatCreate -> MsgContent.Service("created the group")
+    is MessageForumTopicCreated -> MsgContent.Service("created topic \"$name\"")
+
     else -> MsgContent.Other("Unsupported message")
 }
 
@@ -199,5 +317,9 @@ fun MsgContent.previewText(): String = when (this) {
     is MsgContent.Video -> "📹 $label"
     is MsgContent.Sticker -> "$emoji Sticker"
     is MsgContent.Doc -> "📄 $fileName"
+    is MsgContent.Poll -> "📊 $question"
+    is MsgContent.Location -> "📍 ${title ?: "Location"}"
+    is MsgContent.Contact -> "👤 $name"
+    is MsgContent.Service -> label
     is MsgContent.Other -> label
 }

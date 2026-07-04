@@ -102,7 +102,9 @@ class MessageNotifier(
                 RemoteInput.Builder(KEY_REPLY)
                     .setLabel("Reply")
                     // One-tap chips on the notification, straight from Settings.
-                    .setChoices(s.quickReplyList().toTypedArray())
+                    .setChoices(
+                        if (s.quickRepliesEnabled) s.quickReplyList().toTypedArray() else emptyArray()
+                    )
                     .build()
             )
             .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)

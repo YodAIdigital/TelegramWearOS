@@ -28,6 +28,8 @@ data class AppSettings(
     val keepAliveMinBattery: Int = 20,
     /** Semicolon-separated one-tap replies. */
     val quickReplies: String = DEFAULT_QUICK_REPLIES,
+    /** Master switch for quick-reply chips (composer + notification choices). */
+    val quickRepliesEnabled: Boolean = true,
 )
 
 fun AppSettings.quickReplyList(): List<String> =
@@ -48,6 +50,7 @@ class SettingsRepository(private val context: Context) {
         val autoCleanupDays = intPreferencesKey("auto_cleanup_days")
         val keepAliveMinBattery = intPreferencesKey("keep_alive_min_battery")
         val quickReplies = stringPreferencesKey("quick_replies")
+        val quickRepliesEnabled = booleanPreferencesKey("quick_replies_enabled")
     }
 
     val flow: Flow<AppSettings> = context.dataStore.data.map { p ->
@@ -61,6 +64,7 @@ class SettingsRepository(private val context: Context) {
             autoCleanupDays = p[Keys.autoCleanupDays] ?: 0,
             keepAliveMinBattery = p[Keys.keepAliveMinBattery] ?: 20,
             quickReplies = p[Keys.quickReplies] ?: DEFAULT_QUICK_REPLIES,
+            quickRepliesEnabled = p[Keys.quickRepliesEnabled] ?: true,
         )
     }
 
@@ -73,4 +77,5 @@ class SettingsRepository(private val context: Context) {
     suspend fun setAutoCleanupDays(v: Int) = context.dataStore.edit { it[Keys.autoCleanupDays] = v }
     suspend fun setKeepAliveMinBattery(v: Int) = context.dataStore.edit { it[Keys.keepAliveMinBattery] = v }
     suspend fun setQuickReplies(v: String) = context.dataStore.edit { it[Keys.quickReplies] = v }
+    suspend fun setQuickRepliesEnabled(v: Boolean) = context.dataStore.edit { it[Keys.quickRepliesEnabled] = v }
 }

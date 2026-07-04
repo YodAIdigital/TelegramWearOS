@@ -17,6 +17,7 @@ import app.yodai.telewear.ui.chat.ChatScreen
 import app.yodai.telewear.ui.chatlist.ChatListScreen
 import app.yodai.telewear.ui.components.LocalAppGraph
 import app.yodai.telewear.ui.components.LocalFontScale
+import app.yodai.telewear.ui.settings.QuickRepliesScreen
 import app.yodai.telewear.ui.settings.SettingsScreen
 import app.yodai.telewear.ui.theme.TeleWearTheme
 
@@ -68,7 +69,10 @@ private fun MainNav(graph: AppGraph) {
             ChatScreen(chatId)
         }
         composable("settings") {
-            SettingsScreen()
+            SettingsScreen(onQuickReplies = { nav.navigate("quickReplies") })
+        }
+        composable("quickReplies") {
+            QuickRepliesScreen()
         }
     }
 }

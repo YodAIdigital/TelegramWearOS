@@ -146,7 +146,7 @@ fun LinkedText(text: String, fontScale: Float) {
     )
 }
 
-private fun openLink(context: Context, url: String) {
+internal fun openLink(context: Context, url: String) {
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE)
     try {
         context.startActivity(intent)
