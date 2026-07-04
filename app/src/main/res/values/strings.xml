@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TeleWear</string>
+    <string name="notification_channel_messages">Messages</string>
+    <string name="notification_channel_ongoing">Background connection</string>
+</resources>

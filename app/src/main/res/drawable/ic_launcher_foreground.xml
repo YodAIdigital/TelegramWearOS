@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- User's mascot artwork (transparent PNG), inset so the wide ears stay
+     inside the circular adaptive-icon mask on the round watch launcher. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_mascot"
+    android:inset="18%" />
