@@ -26,6 +26,8 @@ data class AppSettings(
     val autoCleanupDays: Int = 0,
     /** Suspend "Stay connected" below this battery %; 0 = never suspend. */
     val keepAliveMinBattery: Int = 20,
+    /** Show the keep-alive shortcut chip on the watch face while connected. */
+    val showWatchFaceShortcut: Boolean = true,
     /** Semicolon-separated one-tap replies. */
     val quickReplies: String = DEFAULT_QUICK_REPLIES,
     /** Master switch for quick-reply chips (composer + notification choices). */
@@ -49,6 +51,7 @@ class SettingsRepository(private val context: Context) {
         val smartDedupe = booleanPreferencesKey("smart_dedupe")
         val autoCleanupDays = intPreferencesKey("auto_cleanup_days")
         val keepAliveMinBattery = intPreferencesKey("keep_alive_min_battery")
+        val showWatchFaceShortcut = booleanPreferencesKey("show_watch_face_shortcut")
         val quickReplies = stringPreferencesKey("quick_replies")
         val quickRepliesEnabled = booleanPreferencesKey("quick_replies_enabled")
     }
@@ -63,6 +66,7 @@ class SettingsRepository(private val context: Context) {
             smartDedupe = p[Keys.smartDedupe] ?: true,
             autoCleanupDays = p[Keys.autoCleanupDays] ?: 0,
             keepAliveMinBattery = p[Keys.keepAliveMinBattery] ?: 20,
+            showWatchFaceShortcut = p[Keys.showWatchFaceShortcut] ?: true,
             quickReplies = p[Keys.quickReplies] ?: DEFAULT_QUICK_REPLIES,
             quickRepliesEnabled = p[Keys.quickRepliesEnabled] ?: true,
         )
@@ -76,6 +80,7 @@ class SettingsRepository(private val context: Context) {
     suspend fun setSmartDedupe(v: Boolean) = context.dataStore.edit { it[Keys.smartDedupe] = v }
     suspend fun setAutoCleanupDays(v: Int) = context.dataStore.edit { it[Keys.autoCleanupDays] = v }
     suspend fun setKeepAliveMinBattery(v: Int) = context.dataStore.edit { it[Keys.keepAliveMinBattery] = v }
+    suspend fun setShowWatchFaceShortcut(v: Boolean) = context.dataStore.edit { it[Keys.showWatchFaceShortcut] = v }
     suspend fun setQuickReplies(v: String) = context.dataStore.edit { it[Keys.quickReplies] = v }
     suspend fun setQuickRepliesEnabled(v: Boolean) = context.dataStore.edit { it[Keys.quickRepliesEnabled] = v }
 }

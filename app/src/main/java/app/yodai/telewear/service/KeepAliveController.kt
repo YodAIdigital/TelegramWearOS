@@ -20,16 +20,22 @@ class KeepAliveController(
     settings: SettingsRepository,
     scope: CoroutineScope,
 ) {
+    /** Desired service state: whether to run, and whether to pin the watch-face chip. */
+    private data class KeepAliveState(val running: Boolean, val showShortcut: Boolean)
+
     init {
         scope.launch {
             combine(settings.flow, batteryFlow(context)) { s, battery ->
-                s.keepAlive &&
+                val running = s.keepAlive &&
                     (s.keepAliveMinBattery == 0 || battery.charging || battery.percent > s.keepAliveMinBattery)
+                KeepAliveState(running, s.showWatchFaceShortcut)
             }
                 .distinctUntilChanged()
-                .collect { shouldRun ->
-                    Log.i("KeepAliveController", "keep-alive service running=$shouldRun")
-                    KeepAliveService.setEnabled(context, shouldRun)
+                .collect { state ->
+                    Log.i("KeepAliveController", "running=${state.running} shortcut=${state.showShortcut}")
+                    // Re-issuing while running rebuilds the notification, so flipping
+                    // the shortcut preference adds/removes the chip live.
+                    KeepAliveService.setEnabled(context, state.running, state.showShortcut)
                 }
         }
     }

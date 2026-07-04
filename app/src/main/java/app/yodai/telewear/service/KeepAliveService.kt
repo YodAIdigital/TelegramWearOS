@@ -37,12 +37,17 @@ class KeepAliveService : Service() {
             .setContentIntent(touchIntent)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
 
-        // Shows the app as an ongoing activity chip on the watch face.
-        OngoingActivity.Builder(applicationContext, NOTIFICATION_ID, builder)
-            .setStaticIcon(R.drawable.ic_notification)
-            .setTouchIntent(touchIntent)
-            .build()
-            .apply(applicationContext)
+        // The foreground-service notification is mandatory, but the watch-face
+        // chip is opt-out: only decorate it as an OngoingActivity when the user
+        // wants the shortcut. Its icon is the app mascot.
+        val showShortcut = intent?.getBooleanExtra(EXTRA_SHOW_SHORTCUT, true) ?: true
+        if (showShortcut) {
+            OngoingActivity.Builder(applicationContext, NOTIFICATION_ID, builder)
+                .setStaticIcon(R.drawable.ic_mascot)
+                .setTouchIntent(touchIntent)
+                .build()
+                .apply(applicationContext)
+        }
 
         ServiceCompat.startForeground(
             this,
@@ -57,9 +62,11 @@ class KeepAliveService : Service() {
 
     companion object {
         private const val NOTIFICATION_ID = 100
+        private const val EXTRA_SHOW_SHORTCUT = "show_shortcut"
 
-        fun setEnabled(context: Context, enabled: Boolean) {
+        fun setEnabled(context: Context, enabled: Boolean, showShortcut: Boolean = true) {
             val i = Intent(context, KeepAliveService::class.java)
+                .putExtra(EXTRA_SHOW_SHORTCUT, showShortcut)
             if (enabled) context.startForegroundService(i) else context.stopService(i)
         }
     }

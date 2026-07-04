@@ -53,6 +53,7 @@ class SettingsViewModel(private val graph: AppGraph) : ViewModel() {
     fun setShowPreview(v: Boolean) = viewModelScope.launch { graph.settings.setShowPreview(v) }
     fun setKeepAlive(v: Boolean) = viewModelScope.launch { graph.settings.setKeepAlive(v) }
     fun setSmartDedupe(v: Boolean) = viewModelScope.launch { graph.settings.setSmartDedupe(v) }
+    fun setWatchFaceShortcut(v: Boolean) = viewModelScope.launch { graph.settings.setShowWatchFaceShortcut(v) }
 
     /** Battery floor for keep-alive: 0 (never pause) → 50% in steps of 10. */
     fun cycleKeepAliveBattery() = viewModelScope.launch {
@@ -286,6 +287,16 @@ fun SettingsScreen(onQuickReplies: () -> Unit) {
                             )
                         },
                         secondaryLabel = { Text("Resumes when charging", fontSize = 10.sp) },
+                    )
+                }
+
+                item {
+                    SwitchButton(
+                        checked = settings.showWatchFaceShortcut,
+                        onCheckedChange = { vm.setWatchFaceShortcut(it) },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("Watch face shortcut", fontSize = 13.sp) },
+                        secondaryLabel = { Text("Show the chip on your watch face", fontSize = 10.sp) },
                     )
                 }
             }
