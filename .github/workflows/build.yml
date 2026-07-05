@@ -35,6 +35,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.1.${{ github.run_number }}
-          name: TeleWear 1.1.${{ github.run_number }}
+          name: YodChat 1.1.${{ github.run_number }}
           body: "Automated build from ${{ github.sha }}"
           files: app/build/outputs/apk/release/app-release.apk

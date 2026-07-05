@@ -11,12 +11,18 @@ import dev.g000sha256.tdl.dto.ChatType
 import dev.g000sha256.tdl.dto.ChatTypeBasicGroup
 import dev.g000sha256.tdl.dto.ChatTypeSupergroup
 import dev.g000sha256.tdl.dto.Message
+import dev.g000sha256.tdl.dto.MessageSenderUser
+import dev.g000sha256.tdl.dto.MessageTopicForum
 import dev.g000sha256.tdl.dto.User
+import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -41,17 +47,24 @@ class ChatRepository(private val core: TelegramCore, private val scope: Coroutin
     private val states = MutableStateFlow<Map<Long, ChatState>>(emptyMap())
     private val users = MutableStateFlow<Map<Long, User>>(emptyMap())
 
+    /** Resolved forum topic names, keyed by (chatId, forumTopicId). */
+    private val topicNames = MutableStateFlow<Map<Pair<Long, Int>, String>>(emptyMap())
+    private val topicFetchInFlight = ConcurrentHashMap.newKeySet<Pair<Long, Int>>()
+
     /** Telegram chat folders (id → name), in the user's configured order. */
     val folders = MutableStateFlow<List<Pair<Int, String>>>(emptyList())
 
     /** null = the main list; otherwise a folder id from [folders]. */
     val selectedFolderId = MutableStateFlow<Int?>(null)
 
-    val chatList: StateFlow<List<ChatItem>> = combine(states, selectedFolderId) { map, folderId ->
-        map.values
-            .mapNotNull { it.toChatItem(folderId) }
-            .sortedWith(compareByDescending<ChatItem> { it.pinned }.thenByDescending { it.order })
-    }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+    // Recomputes on chat, folder, topic-name, or sender-user changes so forum
+    // rows fill in their topic name and sender avatar as those resolve.
+    val chatList: StateFlow<List<ChatItem>> =
+        combine(states, selectedFolderId, topicNames, users) { map, folderId, _, _ ->
+            map.values
+                .mapNotNull { it.toChatItem(folderId) }
+                .sortedWith(compareByDescending<ChatItem> { it.pinned }.thenByDescending { it.order })
+        }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     init {
         scope.launch {
@@ -109,6 +122,31 @@ class ChatRepository(private val core: TelegramCore, private val scope: Coroutin
         scope.launch {
             core.updates { it.userUpdates }.collect { u ->
                 users.value = users.value + (u.user.id to u.user)
+            }
+        }
+        // Forum topic names arrive passively as info updates…
+        scope.launch {
+            core.updates { it.forumTopicInfoUpdates }.collect { u ->
+                topicNames.value = topicNames.value + ((u.info.chatId to u.info.forumTopicId) to u.info.name)
+            }
+        }
+        // …and are fetched on demand for any forum last message we can't name yet.
+        scope.launch {
+            states.collect { map ->
+                map.values.forEach { st ->
+                    val tid = (st.lastMessage?.topicId as? MessageTopicForum)?.forumTopicId ?: return@forEach
+                    val key = st.id to tid
+                    if (topicNames.value[key] == null && topicFetchInFlight.add(key)) {
+                        launch {
+                            val name = core.client.getForumTopic(st.id, tid).getOrNull()?.info?.name
+                            if (name != null) {
+                                topicNames.value = topicNames.value + (key to name)
+                            } else {
+                                topicFetchInFlight.remove(key) // allow a later retry
+                            }
+                        }
+                    }
+                }
             }
         }
         // (Re)load the chat list every time authorization becomes Ready.
@@ -197,6 +235,15 @@ class ChatRepository(private val core: TelegramCore, private val scope: Coroutin
 
     private fun ChatState.buildItem(pinned: Boolean, order: Long): ChatItem {
         val supergroup = type as? ChatTypeSupergroup
+
+        // Forum groups: surface the last message's topic and its sender identity.
+        val forumTopicId = (lastMessage?.topicId as? MessageTopicForum)?.forumTopicId
+        val senderId = (lastMessage?.senderId as? MessageSenderUser)?.userId
+        val senderUser = senderId?.let { users.value[it] }
+        val senderDisplay = senderUser
+            ?.let { listOf(it.firstName, it.lastName).filter { s -> s.isNotBlank() }.joinToString(" ") }
+            ?.ifBlank { null }
+
         return ChatItem(
             id = id,
             title = title,
@@ -209,7 +256,46 @@ class ChatRepository(private val core: TelegramCore, private val scope: Coroutin
             preview = lastMessage?.content?.toMsgContent()?.previewText().orEmpty(),
             date = lastMessage?.date ?: 0,
             photoFileId = photoFileId,
+            topicName = forumTopicId?.let { topicNames.value[id to it] },
+            senderPhotoFileId = if (forumTopicId != null) senderUser?.profilePhoto?.small?.id else null,
+            senderName = if (forumTopicId != null) senderDisplay else null,
+            senderUserId = if (forumTopicId != null) senderId else null,
         )
+    }
+
+    /** Reactive mute state for one chat (drives the thread-header toggle). */
+    fun mutedFlow(chatId: Long): Flow<Boolean> =
+        states.map { it[chatId]?.muted ?: false }.distinctUntilChanged()
+
+    /**
+     * Mute/unmute a chat. Overrides only muteFor (Int.MAX_VALUE = forever, 0 =
+     * on); everything else stays on the account default. Result echoes back
+     * through chatNotificationSettingsUpdates and flips [mutedFlow].
+     */
+    fun setMuted(chatId: Long, muted: Boolean) {
+        core.async { client ->
+            client.setChatNotificationSettings(
+                chatId = chatId,
+                notificationSettings = ChatNotificationSettings(
+                    useDefaultMuteFor = false,
+                    muteFor = if (muted) Int.MAX_VALUE else 0,
+                    useDefaultSound = true,
+                    soundId = 0,
+                    useDefaultShowPreview = true,
+                    showPreview = true,
+                    useDefaultMuteStories = true,
+                    muteStories = false,
+                    useDefaultStorySound = true,
+                    storySoundId = 0,
+                    useDefaultShowStoryPoster = true,
+                    showStoryPoster = true,
+                    useDefaultDisablePinnedMessageNotifications = true,
+                    disablePinnedMessageNotifications = false,
+                    useDefaultDisableMentionNotifications = true,
+                    disableMentionNotifications = false,
+                ),
+            )
+        }
     }
 }
 

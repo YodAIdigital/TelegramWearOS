@@ -32,10 +32,21 @@ class TeleWearApp : Application() {
                 NotificationManager.IMPORTANCE_LOW,
             )
         )
+        // Used when the watch-face shortcut is hidden: MIN keeps the mandatory
+        // foreground-service notification off the watch face and out of the
+        // main notification list (collapsed into the silent section).
+        nm.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_ONGOING_SILENT,
+                getString(R.string.notification_channel_ongoing),
+                NotificationManager.IMPORTANCE_MIN,
+            )
+        )
     }
 
     companion object {
         const val CHANNEL_MESSAGES = "messages"
         const val CHANNEL_ONGOING = "ongoing"
+        const val CHANNEL_ONGOING_SILENT = "ongoing_silent"
     }
 }

@@ -27,6 +27,8 @@ import androidx.compose.material.icons.rounded.DoneAll
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.NotificationsOff
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -82,6 +84,8 @@ import coil.compose.AsyncImage
 import java.io.File
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -90,6 +94,11 @@ class ChatViewModel(private val graph: AppGraph, private val chatId: Long) : Vie
     val thread = graph.messages.openThread(chatId, viewModelScope)
     val chat = graph.chats.chatItem(chatId)
     val senderNames = MutableStateFlow<Map<Long, String>>(emptyMap())
+
+    val muted = graph.chats.mutedFlow(chatId)
+        .stateIn(viewModelScope, SharingStarted.Eagerly, chat?.muted ?: false)
+
+    fun toggleMute() = graph.chats.setMuted(chatId, !muted.value)
 
     init {
         graph.activeChatId.value = chatId
@@ -194,8 +203,9 @@ fun ChatScreen(chatId: Long) {
                     )
                 }
 
-                // Visual top: chat title header + pagination trigger.
+                // Visual top: chat title header + mute toggle + pagination trigger.
                 item {
+                    val muted by vm.muted.collectAsState()
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         modifier = Modifier
@@ -210,6 +220,30 @@ fun ChatScreen(chatId: Long) {
                             overflow = TextOverflow.Ellipsis,
                             textAlign = TextAlign.Center,
                         )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .padding(top = 5.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(TeleWearColors.incomingBubble)
+                                .clickable {
+                                    buzz(context)
+                                    vm.toggleMute()
+                                }
+                                .padding(horizontal = 12.dp, vertical = 5.dp),
+                        ) {
+                            Icon(
+                                if (muted) Icons.Rounded.NotificationsOff else Icons.Rounded.Notifications,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = if (muted) TeleWearColors.recordRed else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text(
+                                if (muted) "Muted — tap to unmute" else "Mute notifications",
+                                fontSize = 10.sp,
+                                modifier = Modifier.padding(start = 5.dp),
+                            )
+                        }
                         // Loads one older page each time this header scrolls into view.
                         LaunchedEffect(Unit) { vm.loadMore() }
                     }

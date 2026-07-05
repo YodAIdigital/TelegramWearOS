@@ -45,13 +45,18 @@ class KeepAliveService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
 
-        val builder = NotificationCompat.Builder(this, TeleWearApp.CHANNEL_ONGOING)
+        // Shortcut hidden → post on the MIN-importance channel with min priority
+        // so the mandatory notification drops off the watch face and out of the
+        // main notification list (Android won't let a running FGS have none).
+        val channel = if (showShortcut) TeleWearApp.CHANNEL_ONGOING else TeleWearApp.CHANNEL_ONGOING_SILENT
+        val builder = NotificationCompat.Builder(this, channel)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(getString(R.string.app_name))
             .setContentText("Connected to Telegram")
             .setOngoing(true)
             .setContentIntent(touchIntent)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setPriority(if (showShortcut) NotificationCompat.PRIORITY_LOW else NotificationCompat.PRIORITY_MIN)
 
         // The foreground-service notification is mandatory, but the watch-face
         // chip is opt-out: only decorate it as an OngoingActivity when the user

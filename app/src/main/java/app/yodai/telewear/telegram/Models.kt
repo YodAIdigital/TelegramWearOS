@@ -90,6 +90,12 @@ data class ChatItem(
     val preview: String,
     val date: Int,
     val photoFileId: Int?,
+    /** Forum groups only: the last message's topic name (shown instead of the text preview). */
+    val topicName: String? = null,
+    /** Forum groups only: the last message sender's avatar + identity (shown instead of the group photo). */
+    val senderPhotoFileId: Int? = null,
+    val senderName: String? = null,
+    val senderUserId: Long? = null,
 )
 
 sealed interface MsgContent {

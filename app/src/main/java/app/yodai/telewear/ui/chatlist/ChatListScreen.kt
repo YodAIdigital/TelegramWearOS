@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.NotificationsOff
 import androidx.compose.material.icons.rounded.Search
 import androidx.compose.material.icons.rounded.Settings
@@ -225,11 +226,20 @@ private fun FolderChip(name: String, active: Boolean, onClick: () -> Unit) {
 @Composable
 private fun ChatRow(chat: ChatItem, onClick: () -> Unit) {
     val fontScale = LocalFontScale.current
+    // Forum groups show the last message's sender avatar + topic name in place
+    // of the group photo + text preview.
+    val isTopic = chat.topicName != null
     Button(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
         colors = ButtonDefaults.filledTonalButtonColors(),
-        icon = { ChatAvatar(chat.photoFileId, chat.title, chat.id, 32.dp) },
+        icon = {
+            if (isTopic) {
+                ChatAvatar(chat.senderPhotoFileId, chat.senderName ?: chat.title, chat.senderUserId ?: chat.id, 32.dp)
+            } else {
+                ChatAvatar(chat.photoFileId, chat.title, chat.id, 32.dp)
+            }
+        },
         label = {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                 Text(
@@ -253,12 +263,22 @@ private fun ChatRow(chat: ChatItem, onClick: () -> Unit) {
         },
         secondaryLabel = {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                if (isTopic) {
+                    Icon(
+                        Icons.Rounded.Forum,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .padding(end = 3.dp)
+                            .size(11.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
                 Text(
-                    chat.preview.replace('\n', ' '),
+                    if (isTopic) chat.topicName!! else chat.preview.replace('\n', ' '),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     fontSize = 11.sp * fontScale,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (isTopic) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.weight(1f, fill = false),
                 )
                 if (chat.unread > 0) {
